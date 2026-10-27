@@ -10,5 +10,5 @@ export async function GET() {
       male: process.env.SAYDI_MALE_VOICE_ID || "",
       female: process.env.SAYDI_FEMALE_VOICE_ID || "",
     },
-  });
+  }, { headers: { "Cache-Control": "no-store" } });
 }

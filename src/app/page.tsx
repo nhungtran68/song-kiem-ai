@@ -1,6 +1,8 @@
 import Studio, { type PublicRuntimeConfig } from "@/components/studio";
+import { connection } from "next/server";
 
-export default function Home() {
+export default async function Home() {
+  await connection();
   const config: PublicRuntimeConfig = {
     aiReady: Boolean(process.env.OPENAI_API_KEY),
     saydiReady: Boolean(process.env.SAYDI_API_KEY),

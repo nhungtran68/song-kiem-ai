@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createSrt, hydrateAnalysis, secondsLabel } from "@/lib/timeline";
+import { captureFrames, inferMediaType } from "@/lib/media";
 import type { DialogueLine, StudioDraft, TimelineScene, VoicePair } from "@/types/studio";
 
 export type PublicRuntimeConfig = {
@@ -14,11 +15,9 @@ export type PublicRuntimeConfig = {
 };
 
 type LocalMedia = { name: string; size: number; type: string; duration: number };
-type Frame = { time: number; image: string };
 type Notice = { type: "error" | "info" | "success"; text: string };
 const STYLES = ["Điện ảnh", "Hài hước", "Lãng mạn", "Kịch tính", "Đời thường", "Cổ trang"];
 const DRAFT_KEY = "song-kiem-ai-draft-v2";
-const ACCEPTED_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "video/mp4", "video/quicktime", "video/webm"]);
 
 function Icon({ name }: { name: "upload" | "spark" | "plus" | "trash" | "play" | "download" | "stop" }) {
   const paths = {
@@ -65,65 +64,8 @@ function safeName(title: string) {
   return title.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "song-kiem-ai";
 }
 
-function drawFrame(source: CanvasImageSource, width: number, height: number): string {
-  const scale = Math.min(1, 768 / Math.max(width, height));
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.max(1, Math.round(width * scale));
-  canvas.height = Math.max(1, Math.round(height * scale));
-  const context = canvas.getContext("2d");
-  if (!context) throw new Error("Trình duyệt không thể đọc khung hình.");
-  context.drawImage(source, 0, 0, canvas.width, canvas.height);
-  const image = canvas.toDataURL("image/jpeg", 0.65);
-  if (image.length > 400_000) throw new Error("Khung hình quá lớn để phân tích. Hãy thử tệp khác.");
-  return image;
-}
-
-async function captureFrames(file: File): Promise<{ frames: Frame[]; duration: number; mediaKind: "image" | "video" }> {
-  const url = URL.createObjectURL(file);
-  try {
-    if (file.type.startsWith("image/")) {
-      const image = new Image();
-      image.src = url;
-      await image.decode();
-      return { frames: [{ time: 0, image: drawFrame(image, image.naturalWidth, image.naturalHeight) }], duration: 15, mediaKind: "image" };
-    }
-
-    const video = document.createElement("video");
-    video.preload = "auto";
-    video.muted = true;
-    video.playsInline = true;
-    video.src = url;
-    await new Promise<void>((resolve, reject) => {
-      video.onloadedmetadata = () => resolve();
-      video.onerror = () => reject(new Error("Không đọc được video. Hãy thử MP4 hoặc WEBM với codec trình duyệt hỗ trợ."));
-      video.load();
-    });
-    const duration = video.duration;
-    if (!Number.isFinite(duration) || duration <= 0 || duration > 7_200) {
-      throw new Error("Video phải có thời lượng hợp lệ, tối đa 2 giờ.");
-    }
-    const count = Math.min(8, Math.max(2, Math.ceil(duration / 15) + 1));
-    const frames: Frame[] = [];
-    const inset = Math.min(0.1, duration / 4);
-    for (let index = 0; index < count; index++) {
-      const time = inset + ((duration - 2 * inset) * index) / (count - 1);
-      await new Promise<void>((resolve, reject) => {
-        const timeout = window.setTimeout(() => reject(new Error(`Đọc video quá lâu tại ${secondsLabel(time)}.`)), 20_000);
-        video.onseeked = () => { window.clearTimeout(timeout); resolve(); };
-        video.onerror = () => { window.clearTimeout(timeout); reject(new Error(`Không đọc được khung hình tại ${secondsLabel(time)}.`)); };
-        video.currentTime = time;
-      });
-      frames.push({ time, image: drawFrame(video, video.videoWidth, video.videoHeight) });
-    }
-    video.removeAttribute("src");
-    video.load();
-    return { frames, duration, mediaKind: "video" };
-  } finally {
-    URL.revokeObjectURL(url);
-  }
-}
-
-export default function Studio({ config }: { config: PublicRuntimeConfig }) {
+export default function Studio({ config: initialConfig }: { config: PublicRuntimeConfig }) {
+  const [config, setConfig] = useState(initialConfig);
   const [title, setTitle] = useState("Dự án chưa đặt tên");
   const [style, setStyle] = useState(STYLES[0]);
   const [prompt, setPrompt] = useState("");
@@ -144,10 +86,23 @@ export default function Studio({ config }: { config: PublicRuntimeConfig }) {
   const speechUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
+    const controller = new AbortController();
+    const refresh = () => {
+      void fetch("/api/config", { cache: "no-store", signal: controller.signal })
+        .then(async (response) => {
+          if (response.ok) setConfig(await response.json() as PublicRuntimeConfig);
+        }).catch(() => { /* Keep the server-provided status if the network is unavailable. */ });
+    };
+    refresh();
+    window.addEventListener("focus", refresh);
+    return () => { controller.abort(); window.removeEventListener("focus", refresh); };
+  }, []);
+
+  useEffect(() => {
     const frame = requestAnimationFrame(() => {
-      const raw = localStorage.getItem(DRAFT_KEY) || localStorage.getItem("song-kiem-ai-draft-v1");
-      if (raw) {
-        try {
+      try {
+        const raw = localStorage.getItem(DRAFT_KEY) || localStorage.getItem("song-kiem-ai-draft-v1");
+        if (raw) {
           const draft = JSON.parse(raw) as StudioDraft;
           if (draft.version === 1 || draft.version === 2) {
             setTitle(draft.title);
@@ -157,8 +112,8 @@ export default function Studio({ config }: { config: PublicRuntimeConfig }) {
             setSummary(draft.summary);
             setScenes(draft.scenes);
           }
-        } catch { localStorage.removeItem(DRAFT_KEY); }
-      }
+        }
+      } catch { /* Local storage may be unavailable in a private or restricted browser. */ }
       setHydrated(true);
     });
     return () => cancelAnimationFrame(frame);
@@ -167,7 +122,7 @@ export default function Studio({ config }: { config: PublicRuntimeConfig }) {
   useEffect(() => {
     if (!hydrated) return;
     const draft: StudioDraft = { version: 2, title, style, prompt, voiceIds, summary, scenes };
-    localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+    try { localStorage.setItem(DRAFT_KEY, JSON.stringify(draft)); } catch { /* Editing still works without draft storage. */ }
   }, [hydrated, prompt, scenes, style, summary, title, voiceIds]);
 
   useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl); }, [previewUrl]);
@@ -198,25 +153,33 @@ export default function Studio({ config }: { config: PublicRuntimeConfig }) {
       : scene));
   };
 
-  const selectFile = async (selected: File) => {
-    if (!ACCEPTED_TYPES.has(selected.type)) { setMessage({ type: "error", text: "Định dạng ảnh/video chưa được hỗ trợ." }); return; }
+  const selectFile = (selected: File) => {
+    if (busy) return;
+    const mediaType = inferMediaType(selected);
+    if (!mediaType) { setMessage({ type: "error", text: "Định dạng ảnh/video chưa được hỗ trợ." }); return; }
     if (selected.size > 2 * 1024 * 1024 * 1024) { setMessage({ type: "error", text: "Tệp vượt quá 2 GB." }); return; }
     setFile(selected);
     setPreviewUrl(URL.createObjectURL(selected));
-    setMedia({ name: selected.name, size: selected.size, type: selected.type, duration: 0 });
+    setMedia({ name: selected.name, size: selected.size, type: mediaType, duration: 0 });
     setMessage({ type: "info", text: "Tệp chỉ nằm trên thiết bị của bạn. Khi phân tích, trình duyệt gửi tối đa 8 khung hình tới OpenAI; không gửi video gốc hoặc âm thanh." });
   };
 
   const analyze = async () => {
-    if (!file) { setMessage({ type: "error", text: "Hãy chọn ảnh hoặc video trước." }); return; }
+    if (analyzeRef.current) return;
+    if (!file) {
+      setMessage({ type: "info", text: "Chọn ảnh hoặc video, sau đó bấm Phân tích bằng OpenAI để tạo kịch bản." });
+      inputRef.current?.click();
+      return;
+    }
     const controller = new AbortController();
     analyzeRef.current = controller;
     setBusy(true);
     setMessage({ type: "info", text: "Đang lấy các khung hình và phân tích..." });
     try {
-      const captured = await captureFrames(file);
+      const captured = await captureFrames(file, controller.signal, (text) => setMessage({ type: "info", text }));
       if (controller.signal.aborted) return;
       setMedia((current) => current ? { ...current, duration: captured.duration } : current);
+      setMessage({ type: "info", text: `Đã lấy ${captured.frames.length} khung hình. OpenAI đang phân tích và viết kịch bản...` });
       const response = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -230,7 +193,9 @@ export default function Studio({ config }: { config: PublicRuntimeConfig }) {
       setScenes(analysis.scenes);
       setMessage({ type: "success", text: `Đã tạo ${analysis.scenes.length} cảnh. Hãy kiểm tra và sửa lời thoại trước khi xuất.` });
     } catch (error) {
-      if (!controller.signal.aborted) setMessage({ type: "error", text: errorMessage(error) });
+      setMessage(controller.signal.aborted
+        ? { type: "info", text: "Đã hủy chờ phân tích. Bạn có thể chọn tệp và thử lại." }
+        : { type: "error", text: errorMessage(error) });
     } finally {
       if (analyzeRef.current === controller) analyzeRef.current = null;
       setBusy(false);
@@ -312,8 +277,13 @@ export default function Studio({ config }: { config: PublicRuntimeConfig }) {
     {message && <div className={`notice ${message.type}`} role="status"><span>{message.type === "error" ? "!" : message.type === "success" ? "✓" : "i"}</span>{message.text}</div>}
     <section className="workspace-grid">
       <article className="panel media-panel"><div className="panel-heading"><div><span className="section-number">01</span><h2>Ảnh / video nguồn</h2></div><small>CHỈ XỬ LÝ TẠM THỜI</small></div>
-        <div className={`dropzone ${previewUrl ? "has-media" : ""}`}>{previewUrl ? <>{file?.type.startsWith("video/") ? <video src={previewUrl} controls playsInline /> : <img src={previewUrl} alt="Ảnh được chọn" />}<button className="change-media" type="button" onClick={() => inputRef.current?.click()}><Icon name="upload" />Đổi tệp</button></> : <button className="dropzone-empty" type="button" onClick={() => inputRef.current?.click()}><span className="drop-icon"><Icon name="upload" /></span><strong>Chạm để chọn ảnh hoặc video</strong><small>JPG, PNG, WEBP, MP4, MOV hoặc WEBM • tối đa 2 GB</small></button>}</div>
-        <input ref={inputRef} hidden type="file" accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm" onChange={(event) => { const selected = event.target.files?.[0]; if (selected) void selectFile(selected); event.currentTarget.value = ""; }} />
+        <div className={`dropzone ${previewUrl ? "has-media" : ""}`}>
+          {previewUrl ? <>
+            {media?.type.startsWith("video/") ? <video src={previewUrl} controls playsInline /> : <img src={previewUrl} alt="Ảnh được chọn" />}
+            <button className="change-media" type="button" disabled={busy} onClick={() => inputRef.current?.click()}><Icon name="upload" />Đổi tệp</button>
+          </> : <button className="dropzone-empty" type="button" onClick={() => inputRef.current?.click()}><span className="drop-icon"><Icon name="upload" /></span><strong>Chạm để chọn ảnh hoặc video</strong><small>JPG, PNG, WEBP, MP4, MOV hoặc WEBM • tối đa 2 GB</small></button>}
+        </div>
+        <input ref={inputRef} hidden type="file" disabled={busy} accept=".jpg,.jpeg,.png,.webp,.mp4,.m4v,.mov,.webm,image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm" onChange={(event) => { const selected = event.target.files?.[0]; if (selected) selectFile(selected); event.currentTarget.value = ""; }} />
         {media && <div className="file-meta"><span>{media.name}</span><small>{(media.size / 1024 / 1024).toFixed(1)} MB{media.duration ? ` • ${secondsLabel(media.duration)}` : ""}</small></div>}
       </article>
       <article className="panel setup-panel"><div className="panel-heading"><div><span className="section-number">02</span><h2>Thiết lập</h2></div><small>{config.aiModel}</small></div>
@@ -322,7 +292,11 @@ export default function Studio({ config }: { config: PublicRuntimeConfig }) {
         <label className="field prompt-field"><span>Ý tưởng cho kịch bản (không bắt buộc)</span><textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} maxLength={600} placeholder="Ví dụ: Hai người bạn lâu ngày gặp lại, lời thoại vui và ngắn gọn." /><small>{prompt.length}/600 ký tự • AI dựa vào các khung hình mẫu và ý tưởng này.</small></label>
         <div className="voice-grid"><label className="field voice male"><span><i /> Nhân vật nam</span><input placeholder="voice_id, ví dụ vi-adam" value={voiceIds.male} onChange={(event) => setVoiceIds((current) => ({ ...current, male: event.target.value }))} /></label><label className="field voice female"><span><i /> Nhân vật nữ</span><input placeholder="voice_id hoặc vc_..." value={voiceIds.female} onChange={(event) => setVoiceIds((current) => ({ ...current, female: event.target.value }))} /></label></div>
         <p className="voice-note">Hai Voice ID SaydiVoice được giữ riêng khi xuất kịch bản. Nghe thử sẽ trừ credits theo ký tự. AI chỉ xem khung hình mẫu, không nghe âm thanh.</p>
-        <div className="action-row"><button className="button primary" disabled={!file || busy || !config.aiReady} onClick={() => void analyze()}><Icon name="spark" />{busy ? "Đang phân tích..." : "Phân tích bằng OpenAI"}</button>{busy && <button className="button ghost danger" onClick={() => analyzeRef.current?.abort()}><Icon name="stop" />Hủy</button>}</div>
+        <div className="action-row">
+          <button type="button" className="button primary" disabled={busy} aria-describedby="analysis-help" onClick={() => void analyze()}><Icon name="spark" />{busy ? "Đang phân tích..." : file ? "Phân tích bằng OpenAI" : "Chọn tệp để phân tích"}</button>
+          {busy && <button type="button" className="button ghost danger" onClick={() => analyzeRef.current?.abort()}><Icon name="stop" />Hủy</button>}
+        </div>
+        <p id="analysis-help" className="voice-note">{file ? `Đã chọn: ${file.name}. Bấm phân tích để tạo kịch bản từ tệp này.` : "Chọn ảnh hoặc video trước khi phân tích. Chỉ nhập ý tưởng thì chưa đủ dữ liệu hình ảnh."}</p>
         {!config.aiReady && <p className="voice-note">Để bật phân tích, thêm <code>OPENAI_API_KEY</code> vào Environment Variables trên Vercel rồi triển khai lại.</p>}
       </article>
     </section>
