@@ -7,7 +7,8 @@
 1. Chọn ảnh hoặc video. Tệp gốc chỉ được mở trong trình duyệt, không tải lên máy chủ hay kho lưu trữ.
 2. Chọn phong cách, nhập ý tưởng tùy chọn rồi nhấn **Phân tích bằng OpenAI**. Trình duyệt lấy tối đa 8 khung hình JPEG thu nhỏ và gửi chúng qua `/api/analyze` tới OpenAI. Video gốc và âm thanh không được gửi. Vì AI chỉ thấy các khung hình mẫu, cần xem lại các chi tiết nằm giữa chúng.
 3. Sửa tóm tắt, lời thoại, nhân vật, cảm xúc và mốc thời gian. Hai Voice ID SaydiVoice được giữ riêng. Kịch bản tự lưu trong `localStorage` của trình duyệt hiện tại; ảnh/video không được lưu.
-4. Nghe thử từng câu qua SaydiVoice nếu muốn. Xuất **TXT** (gồm hai Voice ID, cảnh, lời thoại, thời gian) và **SRT** để ghép bằng công cụ ngoài. Ứng dụng không dựng MP4.
+4. Bấm **Tạo âm thanh toàn bộ**: tạo đúng giọng nam/nữ từng câu rồi ghép và tự tải **một file WAV hoàn chỉnh**. Chọn nối liên tục hoặc giữ khoảng nghỉ theo timeline. Nếu một câu đọc dài hơn dự kiến, câu sau lùi lại để giữ đủ lời. Có tiến trình và nút dừng; các đoạn đã tạo được dùng lại trong tab hiện tại khi nghe thử/tạo lại. Giới hạn 500 câu và 30 phút mỗi file; hãy giữ trang mở và tải file trước khi đóng trang.
+5. Xuất **TXT** (gồm hai Voice ID, cảnh, lời thoại, thời gian) và **SRT** để ghép bằng công cụ ngoài. Ứng dụng không dựng MP4. File âm thanh được ghép trong trình duyệt, không cần kho lưu trữ hoặc tải video lên server.
 
 ## Cấu hình
 

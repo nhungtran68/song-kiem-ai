@@ -94,7 +94,20 @@ svg { width: 20px; height: 20px; }
 .file-meta small { color: var(--muted); white-space: nowrap; }
 
 .setup-panel { padding-bottom: 20px; }
-.setup-panel > .field, .voice-grid, .voice-note, .setup-panel .action-row, .job-chip { margin-left: 20px; margin-right: 20px; }
+.setup-panel > .field, .setup-panel > .studio-fields > .field, .voice-grid, .voice-note, .setup-panel .action-row, .job-chip { margin-left: 20px; margin-right: 20px; }
+.studio-fields { min-width: 0; margin: 0; padding: 0; border: 0; }
+.audio-panel { margin-top: 18px; }
+.audio-body { padding: 20px; }
+.audio-body > p { margin-top: 0; font-size: 13px; line-height: 1.65; color: var(--muted); }
+.audio-body > .voice-note { margin: 12px 0 0; }
+.audio-body .field { max-width: 440px; }
+.audio-progress { margin-top: 18px; font-size: 13px; }
+.audio-progress progress { width: 100%; height: 12px; accent-color: var(--red); }
+.audio-result { display: grid; gap: 14px; margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--line); }
+.audio-result p { margin: 0; font-size: 13px; }
+.audio-result audio { width: 100%; }
+.audio-result .button { justify-self: start; }
+.audio-result small { color: var(--muted); line-height: 1.5; }
 .field { display: flex; flex-direction: column; gap: 7px; margin-top: 18px; }
 .field > span { color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
 .field input, .field select { width: 100%; height: 45px; padding: 0 12px; border: 1px solid var(--line); border-radius: 0; background: #fffefa; color: var(--ink); }
@@ -207,7 +220,11 @@ footer span { color: var(--red); }
   .panel-heading > small { max-width: 108px; }
   .dropzone { width: calc(100% - 24px); height: 260px; margin: 12px; }
   .dropzone-empty small { font-size: 10px; }
-  .setup-panel > .field, .voice-grid, .voice-note, .setup-panel .action-row, .job-chip { margin-left: 14px; margin-right: 14px; }
+  .setup-panel > .field, .setup-panel > .studio-fields > .field, .voice-grid, .voice-note, .setup-panel .action-row, .job-chip { margin-left: 14px; margin-right: 14px; }
+  .audio-body { padding: 16px; }
+  .audio-body > .voice-note { margin-left: 0; margin-right: 0; }
+  .audio-body .action-row { flex-direction: column; }
+  .audio-result .button { width: 100%; }
   .voice-grid { grid-template-columns: 1fr; }
   .timeline-heading { align-items: flex-start; gap: 14px; }
   .timeline-actions { flex-direction: column; align-items: flex-end; gap: 6px; }
