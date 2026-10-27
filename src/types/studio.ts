@@ -40,7 +40,9 @@ export type StudioDraft = {
   version: 1;
   title: string;
   style: string;
+  prompt?: string;
   voiceIds: VoicePair;
+  includeTts?: boolean;
   summary: string;
   scenes: TimelineScene[];
   media: MediaAsset | null;

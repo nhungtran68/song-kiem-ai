@@ -49,4 +49,30 @@ describe("studio job schema", () => {
       lines: [{ speaker: "male", text: "Bắt đầu thôi.", start: 4, end: 2 }],
     }).success).toBe(false);
   });
+
+  it("requires the voice for each speaker when TTS is selected", () => {
+    const job = {
+      action: "render" as const,
+      media,
+      title: "Song Kiếm",
+      voiceIds: { male: "vi-adam", female: "" },
+      lines: [{ speaker: "female" as const, text: "Xin chào.", start: 1, end: 3 }],
+    };
+    expect(studioJobSchema.safeParse(job).success).toBe(false);
+    expect(studioJobSchema.safeParse({ ...job, includeTts: false }).success).toBe(true);
+  });
+
+  it("accepts a bounded creative brief and rejects a video without duration", () => {
+    const input = {
+      action: "analyze" as const,
+      media,
+      title: "Song Kiếm",
+      style: "Điện ảnh",
+      prompt: "Hai nhân vật tranh luận rồi hòa giải.",
+      voiceIds: { male: "vi-adam", female: "vi-cuppy" },
+    };
+    expect(studioJobSchema.safeParse(input).success).toBe(true);
+    expect(studioJobSchema.safeParse({ ...input, prompt: "a".repeat(601) }).success).toBe(false);
+    expect(studioJobSchema.safeParse({ ...input, media: { ...media, duration: 0 } }).success).toBe(false);
+  });
 });

@@ -70,7 +70,9 @@ function makeScene(duration: number): TimelineScene {
 export default function Studio({ config }: { config: PublicRuntimeConfig }) {
   const [title, setTitle] = useState("Dự án chưa đặt tên");
   const [style, setStyle] = useState(STYLES[0]);
+  const [prompt, setPrompt] = useState("");
   const [voiceIds, setVoiceIds] = useState<VoicePair>(config.voiceIds);
+  const [includeTts, setIncludeTts] = useState(true);
   const [summary, setSummary] = useState("");
   const [scenes, setScenes] = useState<TimelineScene[]>([]);
   const [media, setMedia] = useState<MediaAsset | null>(null);
@@ -81,9 +83,13 @@ export default function Studio({ config }: { config: PublicRuntimeConfig }) {
   const [job, setJob] = useState<JobState>(null);
   const [message, setMessage] = useState<{ type: "error" | "info" | "success"; text: string } | null>(null);
   const [renderUrl, setRenderUrl] = useState("");
+  const [speechStatus, setSpeechStatus] = useState<{ lineId: string; phase: "loading" | "playing" } | null>(null);
   const [hydrated, setHydrated] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const cancelledRef = useRef(false);
+  const speechRequestRef = useRef<AbortController | null>(null);
+  const speechAudioRef = useRef<HTMLAudioElement | null>(null);
+  const speechUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -94,7 +100,9 @@ export default function Studio({ config }: { config: PublicRuntimeConfig }) {
           if (draft.version === 1) {
             setTitle(draft.title);
             setStyle(draft.style);
+            setPrompt(draft.prompt ?? "");
             setVoiceIds(draft.voiceIds);
+            setIncludeTts(draft.includeTts ?? true);
             setSummary(draft.summary);
             setScenes(draft.scenes);
             setMedia(draft.media);
@@ -110,13 +118,19 @@ export default function Studio({ config }: { config: PublicRuntimeConfig }) {
 
   useEffect(() => {
     if (!hydrated) return;
-    const draft: StudioDraft = { version: 1, title, style, voiceIds, summary, scenes, media };
+    const draft: StudioDraft = { version: 1, title, style, prompt, voiceIds, includeTts, summary, scenes, media };
     localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
-  }, [hydrated, media, scenes, style, summary, title, voiceIds]);
+  }, [hydrated, includeTts, media, prompt, scenes, style, summary, title, voiceIds]);
 
   useEffect(() => () => {
     if (previewUrl.startsWith("blob:")) URL.revokeObjectURL(previewUrl);
   }, [previewUrl]);
+
+  useEffect(() => () => {
+    speechRequestRef.current?.abort();
+    speechAudioRef.current?.pause();
+    if (speechUrlRef.current) URL.revokeObjectURL(speechUrlRef.current);
+  }, []);
 
   const allLines = useMemo(() => scenes.flatMap((scene) => scene.lines), [scenes]);
   const totalDuration = useMemo(() => Math.max(media?.duration || 0, ...allLines.map((line) => line.end), 0), [allLines, media]);
@@ -143,6 +157,85 @@ export default function Studio({ config }: { config: PublicRuntimeConfig }) {
     setScenes((current) => current.map((scene) => scene.id === lastScene.id
       ? { ...scene, end: Math.max(scene.end, lastEnd + 3), lines: [...scene.lines, makeLine(lastEnd, lastEnd + 3)] }
       : scene));
+  };
+
+  const stopSpeech = () => {
+    speechRequestRef.current?.abort();
+    speechRequestRef.current = null;
+    speechAudioRef.current?.pause();
+    speechAudioRef.current = null;
+    if (speechUrlRef.current) URL.revokeObjectURL(speechUrlRef.current);
+    speechUrlRef.current = null;
+    setSpeechStatus(null);
+  };
+
+  const previewSpeech = async (line: DialogueLine) => {
+    if (speechStatus?.lineId === line.id) {
+      stopSpeech();
+      return;
+    }
+    stopSpeech();
+    const voice = voiceIds[line.speaker].trim();
+    const input = line.text.trim();
+    if (!voice || !input) {
+      setMessage({ type: "error", text: "Cần mã giọng và nội dung câu thoại để nghe thử." });
+      return;
+    }
+
+    const controller = new AbortController();
+    speechRequestRef.current = controller;
+    setSpeechStatus({ lineId: line.id, phase: "loading" });
+    setMessage(null);
+    try {
+      const response = await fetch("/api/saydi/speech", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: "tts-1", voice, input }),
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null) as { error?: { message?: string } | string } | null;
+        const message = typeof payload?.error === "string" ? payload.error : payload?.error?.message;
+        throw new Error(message || `SaydiVoice trả về HTTP ${response.status}.`);
+      }
+      const audioBlob = await response.blob();
+      if (!audioBlob.type.startsWith("audio/") || !audioBlob.size) {
+        throw new Error("SaydiVoice chưa trả về dữ liệu âm thanh hợp lệ.");
+      }
+      if (controller.signal.aborted) return;
+
+      const url = URL.createObjectURL(audioBlob);
+      speechUrlRef.current = url;
+      const audio = new Audio(url);
+      speechAudioRef.current = audio;
+      const finishPlayback = () => {
+        if (speechAudioRef.current !== audio) return;
+        speechAudioRef.current = null;
+        if (speechUrlRef.current === url) speechUrlRef.current = null;
+        URL.revokeObjectURL(url);
+        setSpeechStatus(null);
+      };
+      audio.onended = finishPlayback;
+      audio.onerror = () => {
+        finishPlayback();
+        setMessage({ type: "error", text: "Không phát được file giọng đọc vừa tạo." });
+      };
+      await audio.play();
+      if (speechAudioRef.current !== audio) return;
+      setSpeechStatus({ lineId: line.id, phase: "playing" });
+      const chars = response.headers.get("X-OV-Chars");
+      setMessage({
+        type: "success",
+        text: chars ? `Đang phát giọng ${voice}. SaydiVoice tính ${chars} ký tự cho lượt này.` : `Đang phát giọng ${voice}.`,
+      });
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        stopSpeech();
+        setMessage({ type: "error", text: errorMessage(error) });
+      }
+    } finally {
+      if (speechRequestRef.current === controller) speechRequestRef.current = null;
+    }
   };
 
   const readDuration = (selected: File): Promise<number> => new Promise((resolve) => {
@@ -236,9 +329,9 @@ export default function Studio({ config }: { config: PublicRuntimeConfig }) {
           setRenderUrl(payload.result.render.url);
           setMessage({
             type: "success",
-            text: payload.result.render.originalAudioPreserved
-              ? "MP4 đã dựng xong, giữ âm thanh gốc và burn-in phụ đề."
-              : "MP4 từ ảnh đã dựng xong với phụ đề.",
+            text: payload.result.render.ttsMixed
+              ? "MP4 đã dựng xong với giọng đọc SaydiVoice, phụ đề và âm thanh gốc (nếu có)."
+              : "MP4 đã dựng xong với phụ đề và âm thanh gốc (nếu có).",
           });
         }
         setBusy(null);
@@ -256,16 +349,29 @@ export default function Studio({ config }: { config: PublicRuntimeConfig }) {
       setMessage({ type: "error", text: "Hãy tải media lên trước." });
       return;
     }
-    if (action === "render" && !allLines.some((line) => line.text.trim())) {
+    const filledLines = allLines.filter((line) => line.text.trim());
+    if (action === "render" && !filledLines.length) {
       setMessage({ type: "error", text: "Cần ít nhất một câu thoại để tạo phụ đề." });
       return;
+    }
+    if (action === "render" && includeTts) {
+      if (!config.saydiReady) {
+        setMessage({ type: "error", text: "Chưa cấu hình SAYDI_API_KEY trên server để tạo giọng đọc." });
+        return;
+      }
+      const missing = (["male", "female"] as const).filter((speaker) =>
+        filledLines.some((line) => line.speaker === speaker) && !voiceIds[speaker].trim());
+      if (missing.length) {
+        setMessage({ type: "error", text: `Thiếu Voice ID cho nhân vật ${missing.map((speaker) => speaker === "male" ? "nam" : "nữ").join(" và ")}.` });
+        return;
+      }
     }
     setBusy(action);
     setMessage(null);
     try {
       const body = action === "analyze"
-        ? { action, media, style, title, voiceIds }
-        : { action, media, title, voiceIds, lines: allLines.map(({ speaker, text, start, end }) => ({ speaker, text, start, end })) };
+        ? { action, media, style, title, prompt, voiceIds }
+        : { action, media, title, voiceIds, includeTts, lines: filledLines.map(({ speaker, text, start, end }) => ({ speaker, text, start, end })) };
       const response = await fetch("/api/jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -356,11 +462,12 @@ export default function Studio({ config }: { config: PublicRuntimeConfig }) {
           <div className="panel-heading"><div><span className="section-number">02</span><h2>Thiết lập</h2></div><small>{config.aiModel}</small></div>
           <label className="field"><span>Tên dự án</span><input value={title} onChange={(event) => setTitle(event.target.value)} maxLength={160} /></label>
           <label className="field"><span>Phong cách biên kịch</span><select value={style} onChange={(event) => setStyle(event.target.value)}>{STYLES.map((item) => <option key={item}>{item}</option>)}</select></label>
+          <label className="field prompt-field"><span>Ý tưởng cho kịch bản (không bắt buộc)</span><textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} maxLength={600} placeholder="Ví dụ: Hai người bạn lâu ngày gặp lại, lời thoại vui và ngắn gọn…" /><small>{prompt.length}/600 ký tự · OpenAI sẽ dựa vào ảnh/video và ý tưởng này để soạn hội thoại.</small></label>
           <div className="voice-grid">
             <label className="field voice male"><span><i /> Nhân vật nam</span><input placeholder="voice_id, ví dụ vi-adam" value={voiceIds.male} onChange={(event) => setVoiceIds((current) => ({ ...current, male: event.target.value }))} /></label>
             <label className="field voice female"><span><i /> Nhân vật nữ</span><input placeholder="voice_id hoặc vc_..." value={voiceIds.female} onChange={(event) => setVoiceIds((current) => ({ ...current, female: event.target.value }))} /></label>
           </div>
-          <p className="voice-note">Hai Voice ID được giữ xuyên suốt bản nháp và job. Tạo audio đang khóa cho đến khi có schema payload chính thức của SaydiVoice.</p>
+          <p className="voice-note">Nhập Voice ID SaydiVoice cho mỗi nhân vật sẽ xuất hiện. Nút nghe thử và xuất MP4 có giọng đọc dùng credits theo số ký tự.</p>
           <div className="action-row">
             <button className="button primary" disabled={!media || busy !== null || !config.aiReady} onClick={() => void startJob("analyze")}><Icon name="spark" />{busy === "analyze" ? "Đang phân tích…" : "Phân tích bằng AI"}</button>
             {busy && busy !== "upload" && <button className="button ghost danger" onClick={() => void cancelJob()}><Icon name="stop" />Hủy</button>}
@@ -389,7 +496,7 @@ export default function Studio({ config }: { config: PublicRuntimeConfig }) {
                         <i>{line.speaker === "male" ? "N" : "Nữ"}</i><span>{line.speaker === "male" ? "Nam" : "Nữ"}</span>
                       </button>
                       <div className="dialogue-main">
-                        <textarea aria-label="Nội dung thoại" value={line.text} placeholder="Nhập lời thoại…" onChange={(event) => updateLine(scene.id, line.id, { text: event.target.value })} />
+                        <textarea aria-label="Nội dung thoại" value={line.text} maxLength={800} placeholder="Nhập lời thoại…" onChange={(event) => updateLine(scene.id, line.id, { text: event.target.value })} />
                         <div className="line-meta">
                           <label>Cảm xúc <input value={line.emotion} onChange={(event) => updateLine(scene.id, line.id, { emotion: event.target.value })} /></label>
                           <label>Bắt đầu <input type="number" min="0" step="0.1" value={line.start} onChange={(event) => updateLine(scene.id, line.id, { start: Number(event.target.value) })} /></label>
@@ -397,7 +504,14 @@ export default function Studio({ config }: { config: PublicRuntimeConfig }) {
                         </div>
                       </div>
                       <div className="line-tools">
-                        <button disabled title="Cần schema payload SaydiVoice chính thức" aria-label="Tạo giọng đọc"><Icon name="play" /></button>
+                        <button
+                          type="button"
+                          className={speechStatus?.lineId === line.id ? `is-${speechStatus.phase}` : ""}
+                          disabled={speechStatus?.lineId !== line.id && (!config.saydiReady || !line.text.trim() || !voiceIds[line.speaker].trim() || busy !== null)}
+                          title={speechStatus?.lineId === line.id ? "Dừng giọng đọc" : "Nghe thử giọng đọc (SaydiVoice tính phí theo số ký tự)"}
+                          aria-label={speechStatus?.lineId === line.id ? "Dừng giọng đọc" : `Nghe thử giọng ${line.speaker === "male" ? "nam" : "nữ"}`}
+                          onClick={() => void previewSpeech(line)}
+                        ><Icon name={speechStatus?.lineId === line.id ? "stop" : "play"} /></button>
                         <button onClick={() => removeLine(scene.id, line.id)} aria-label="Xóa câu"><Icon name="trash" /></button>
                       </div>
                     </div>
@@ -410,9 +524,9 @@ export default function Studio({ config }: { config: PublicRuntimeConfig }) {
       </section>
 
       <section className="export-card">
-        <div><span className="eyebrow">FINAL CUT</span><h2>Sẵn sàng dựng bản xem trước?</h2><p>FFmpeg sẽ burn-in phụ đề và giữ nguyên audio gốc của video. Voice TTS chưa được trộn cho đến khi SaydiVoice cung cấp payload chính thức.</p></div>
+        <div><span className="eyebrow">FINAL CUT</span><h2>Sẵn sàng dựng bản xem trước?</h2><p>FFmpeg sẽ burn-in phụ đề và giữ âm thanh gốc nếu media là video. Khi bật giọng đọc, SaydiVoice tạo audio theo từng câu và trộn vào đúng mốc thời gian.</p><label className="export-option"><input type="checkbox" checked={includeTts} onChange={(event) => setIncludeTts(event.target.checked)} /><span>Thêm giọng đọc SaydiVoice vào MP4 <small>Tính phí theo tổng ký tự của các câu thoại có nội dung</small></span></label></div>
         <div className="export-actions">
-          <button className="button light" disabled={!media || !allLines.length || busy !== null || !config.blobReady} onClick={() => void startJob("render")}><Icon name="play" />{busy === "render" ? "Đang dựng…" : "Dựng MP4"}</button>
+          <button className="button light" disabled={!media || !allLines.some((line) => line.text.trim()) || busy !== null || !config.blobReady} onClick={() => void startJob("render")}><Icon name="play" />{busy === "render" ? "Đang dựng…" : "Dựng MP4"}</button>
           {renderUrl && <a className="button outline-light" href={renderUrl} download><Icon name="download" />Tải MP4</a>}
         </div>
       </section>

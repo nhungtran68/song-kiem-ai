@@ -38,16 +38,22 @@ const mediaInputSchema = z.object({
   pathname: z.string().startsWith("uploads/").min(9),
   contentType: z.string().regex(/^(image|video)\//),
   duration: z.number().min(0).max(7_200),
-}).refine(({ url }) => {
+}).superRefine(({ url, contentType, duration }, context) => {
   const hostname = new URL(url).hostname.toLowerCase();
-  return hostname.endsWith(".public.blob.vercel-storage.com");
-}, { message: "Media phải nằm trong Vercel Blob public store của ứng dụng.", path: ["url"] });
+  if (!hostname.endsWith(".public.blob.vercel-storage.com")) {
+    context.addIssue({ code: "custom", message: "Media phải nằm trong Vercel Blob public store của ứng dụng.", path: ["url"] });
+  }
+  if (contentType.startsWith("video/") && duration <= 0) {
+    context.addIssue({ code: "custom", message: "Không đọc được thời lượng video. Hãy chọn một video hợp lệ.", path: ["duration"] });
+  }
+});
 
 export const analyzeJobSchema = z.object({
   action: z.literal("analyze"),
   media: mediaInputSchema,
   style: z.string().trim().min(1).max(80),
   title: z.string().trim().max(160),
+  prompt: z.string().trim().max(600).optional(),
   voiceIds: voicePairSchema,
 });
 
@@ -67,6 +73,30 @@ export const renderJobSchema = z.object({
   title: z.string().trim().max(160),
   lines: z.array(renderLineSchema).min(1).max(200),
   voiceIds: voicePairSchema,
+  includeTts: z.boolean().default(true),
+}).superRefine(({ includeTts, lines, voiceIds, media }, context) => {
+  if (includeTts) {
+    for (const speaker of ["male", "female"] as const) {
+      if (lines.some((line) => line.speaker === speaker) && !voiceIds[speaker]) {
+        context.addIssue({
+          code: "custom",
+          message: `Thiếu Voice ID cho nhân vật ${speaker === "male" ? "nam" : "nữ"}.`,
+          path: ["voiceIds", speaker],
+        });
+      }
+    }
+  }
+  if (media.contentType.startsWith("video/") && media.duration > 0) {
+    for (const [index, line] of lines.entries()) {
+      if (line.end > media.duration + 0.1) {
+        context.addIssue({
+          code: "custom",
+          message: "Mốc thoại vượt quá thời lượng video.",
+          path: ["lines", index, "end"],
+        });
+      }
+    }
+  }
 });
 
 export const studioJobSchema = z.discriminatedUnion("action", [
