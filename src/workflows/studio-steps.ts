@@ -181,6 +181,24 @@ export async function synthesizeDialogueStep({
   "use step";
   try {
     const result = await synthesizeSaydiSpeech(text, voiceId);
+    let durationSeconds = result.durationSeconds;
+    if (!durationSeconds) {
+      const workdir = await mkdtemp(join(tmpdir(), "song-kiem-ai-speech-"));
+      try {
+        const audioPath = join(workdir, "speech.mp3");
+        await writeFile(audioPath, result.audio);
+        durationSeconds = (await probeMedia(audioPath)).duration;
+      } finally {
+        await rm(workdir, { recursive: true, force: true });
+      }
+    }
+    if (!durationSeconds || !Number.isFinite(durationSeconds)) {
+      throw new FatalError(`Không đọc được thời lượng giọng nói ở câu ${index + 1}.`);
+    }
+    const slot = end - start;
+    if (durationSeconds / slot > 2) {
+      throw new FatalError(`Câu ${index + 1} dài ${durationSeconds.toFixed(1)} giây, vượt mốc ${slot.toFixed(1)} giây. Hãy kéo dài mốc thoại.`);
+    }
     const blob = await put(`speech/${crypto.randomUUID()}-${index}.mp3`, Buffer.from(result.audio), {
       access: "public",
       contentType: "audio/mpeg",
@@ -194,7 +212,7 @@ export async function synthesizeDialogueStep({
       end,
       voiceId: result.voiceId,
       charsCharged: result.charsCharged,
-      durationSeconds: result.durationSeconds,
+      durationSeconds,
     };
   } catch (error) {
     if (error instanceof SaydiError && (
