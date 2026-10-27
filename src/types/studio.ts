@@ -27,23 +27,12 @@ export type AnalysisResult = {
   scenes: TimelineScene[];
 };
 
-export type MediaAsset = {
-  url: string;
-  pathname: string;
-  contentType: string;
-  name: string;
-  size: number;
-  duration: number;
-};
-
 export type StudioDraft = {
-  version: 1;
+  version: 1 | 2;
   title: string;
   style: string;
   prompt?: string;
   voiceIds: VoicePair;
-  includeTts?: boolean;
   summary: string;
   scenes: TimelineScene[];
-  media: MediaAsset | null;
 };

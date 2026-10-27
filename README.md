@@ -1,19 +1,17 @@
 # Song Kiếm AI
 
-Ứng dụng Next.js/TypeScript tối ưu điện thoại để biến ảnh hoặc video thành kịch bản hội thoại hai nhân vật, chỉnh timeline, tạo giọng đọc và dựng MP4.
+Ứng dụng Next.js/TypeScript để chọn ảnh hoặc video trên thiết bị, phân tích các khung hình bằng OpenAI, tạo và sửa kịch bản hội thoại hai nhân vật nam/nữ, nghe thử SaydiVoice và xuất kịch bản/phụ đề để ghép video bên ngoài.
 
-## Luồng sử dụng
+## Cách dùng
 
-1. Tải ảnh/video lên Vercel Blob. Video lớn được tải trực tiếp từ trình duyệt bằng multipart.
-2. Chọn phong cách, có thể thêm ý tưởng kịch bản, rồi chạy phân tích. Workflow dùng FFmpeg lấy tối đa 12 khung hình theo timeline và gửi chúng tới model OpenAI qua Vercel AI Gateway. Kết quả có cấu trúc được kiểm tra trước khi vào trình biên tập.
-3. Sửa lời thoại, nhân vật, cảm xúc và mốc thời gian. Nhập Voice ID riêng cho nam và nữ. Bản nháp lưu trong trình duyệt.
-4. Nghe thử một câu qua SaydiVoice hoặc xuất MP4. Khi bật giọng đọc, ứng dụng tạo audio từng câu và trộn theo thời điểm bắt đầu. Câu dài có thể tăng tốc tối đa 2 lần để vừa mốc thời gian; nếu vẫn không vừa, job báo mốc cần kéo dài. Cũng có lựa chọn xuất phụ đề và âm thanh gốc mà không tạo TTS.
-
-Nút nghe thử và xuất MP4 có giọng đọc dùng credits SaydiVoice theo số ký tự. Phản hồi TTS cung cấp `X-OV-Chars` và `X-OV-Voice`; ứng dụng kiểm tra ID giọng thực tế để không âm thầm dùng sai giọng. API key chỉ được đọc ở server.
+1. Chọn ảnh hoặc video. Tệp gốc chỉ được mở trong trình duyệt, không tải lên máy chủ hay kho lưu trữ.
+2. Chọn phong cách, nhập ý tưởng tùy chọn rồi nhấn **Phân tích bằng OpenAI**. Trình duyệt lấy tối đa 8 khung hình JPEG thu nhỏ và gửi chúng qua `/api/analyze` tới OpenAI. Video gốc và âm thanh không được gửi. Vì AI chỉ thấy các khung hình mẫu, cần xem lại các chi tiết nằm giữa chúng.
+3. Sửa tóm tắt, lời thoại, nhân vật, cảm xúc và mốc thời gian. Hai Voice ID SaydiVoice được giữ riêng. Kịch bản tự lưu trong `localStorage` của trình duyệt hiện tại; ảnh/video không được lưu.
+4. Nghe thử từng câu qua SaydiVoice nếu muốn. Xuất **TXT** (gồm hai Voice ID, cảnh, lời thoại, thời gian) và **SRT** để ghép bằng công cụ ngoài. Ứng dụng không dựng MP4.
 
 ## Cấu hình
 
-Yêu cầu Node.js 24+ và pnpm 11.25+.
+Cần Node.js 24+ và pnpm 11.25+:
 
 ```bash
 pnpm install
@@ -21,32 +19,27 @@ copy .env.example .env.local
 pnpm dev
 ```
 
-Điền các biến sau vào `.env.local` khi chạy máy riêng, hoặc trong Environment Variables của project Vercel:
+Đặt các biến sau trong `.env.local` khi chạy tại máy hoặc Vercel → Project → Settings → Environment Variables. Thêm vào **Production** và **Preview**, rồi triển khai lại:
 
 | Biến | Công dụng |
 | --- | --- |
-| `BLOB_READ_WRITE_TOKEN` | Vercel Blob cho upload media và lưu MP4. Được cấp khi kết nối Blob store. |
-| `AI_GATEWAY_API_KEY` | Xác thực Vercel AI Gateway khi chạy local/ngoài Vercel. Deployment Vercel có thể dùng OIDC tự động. |
-| `AI_GATEWAY_MODEL` | Model OpenAI dạng `provider/model`; mặc định `openai/gpt-5.4-mini`. |
+| `OPENAI_API_KEY` | Khóa OpenAI API để phân tích khung hình, chỉ đọc trên server. Đây là khóa từ OpenAI Platform, khác gói ChatGPT. |
+| `OPENAI_MODEL` | Tùy chọn; mặc định `gpt-5.4-mini`. Model cần hỗ trợ ảnh và Structured Outputs. |
 | `SAYDI_API_BASE_URL` | Mặc định `https://voice.saydi.ai/api`. |
-| `SAYDI_API_KEY` | Key `sv_live_...` từ SaydiVoice. Chỉ lưu phía server. |
-| `SAYDI_MALE_VOICE_ID` / `SAYDI_FEMALE_VOICE_ID` | Voice ID ban đầu từ `GET /samples` hoặc giọng clone `vc_...`. Có thể đổi trong giao diện. |
+| `SAYDI_API_KEY` | Khóa SaydiVoice `sv_live_...`, chỉ đọc trên server. |
+| `SAYDI_MALE_VOICE_ID` / `SAYDI_FEMALE_VOICE_ID` | ID giọng lấy từ `GET /samples` hoặc giọng clone `vc_...`; sửa được trong giao diện. |
 
-AI Vision dùng API model OpenAI thông qua AI Gateway. Tài khoản hoặc gói ChatGPT không tự cấp quyền dùng API; [OpenAI mô tả hai hệ thống thanh toán riêng](https://help.openai.com/en/articles/9039756-managing-billing-settings-on-chatgpt-web-and-platform). Trạng thái xanh trong giao diện chỉ phản ánh cấu hình có mặt, không xác nhận credits hay quyền truy cập model. Kiểm tra bằng một job thật sau khi kết nối Blob và Gateway.
+**Không** thêm tiền tố `NEXT_PUBLIC_` vào các khóa. Vercel Blob, `BLOB_READ_WRITE_TOKEN` và `AI_GATEWAY_API_KEY` không cần cho luồng này.
 
-## SaydiVoice
+## API và giới hạn
 
-Ứng dụng gọi `POST /v1/audio/speech` với JSON `model`, `voice`, `input` theo [tài liệu chính thức](https://voice.saydi.ai/docs/vi/). Phản hồi thành công là audio bytes; lỗi theo envelope `error`. `429` được xử lý theo `Retry-After`, đồng thời ghi nhận `X-OV-Limit`. Không dùng tên giọng OpenAI như `alloy` để chọn giọng; cần Voice ID SaydiVoice.
+- `POST /api/analyze`: nhận tối đa 8 khung hình JPEG đã thu nhỏ, phân tích bằng OpenAI và trả kịch bản JSON đã kiểm tra. Giới hạn body 3,8 MB để nằm dưới giới hạn Vercel Function 4,5 MB.
+- `GET /api/config`: trạng thái biến môi trường, không trả khóa.
+- `GET /api/saydi/samples` và `POST /api/saydi/speech`: proxy SaydiVoice cùng origin. Speech thành công trả bytes audio; lỗi trả JSON, xử lý `429`, `Retry-After` và `X-OV-Limit`. Nghe thử sẽ tiêu tốn credits SaydiVoice theo `X-OV-Chars`.
+- Video dài tối đa 2 giờ, tệp tối đa 2 GB trong trình duyệt. Việc đọc MOV/MP4/WEBM phụ thuộc codec mà trình duyệt hỗ trợ. Ảnh/video không lưu lại sau khi tải lại trang; bản nháp lời thoại thì có.
+- Deployment công khai cho phép mọi người gọi AI/TTS bằng credits của chủ dự án, theo lựa chọn của chủ dự án. Trạng thái “sẵn sàng” chỉ cho thấy có biến môi trường, không chứng minh API key còn tiền/quyền truy cập.
 
-`GET /api/saydi/samples` là proxy để xem catalogue. `POST /api/saydi/speech` nhận một câu và trả audio để nghe thử. Workflow xuất video gọi SaydiVoice trên server cho các câu có nội dung khi bật lựa chọn giọng đọc.
-
-## API và kiểm tra
-
-- `POST /api/upload`: cấp token upload trực tiếp, giới hạn 2 GB.
-- `POST /api/jobs`: tạo job `analyze` hoặc `render`.
-- `GET /api/jobs?runId=...`: trạng thái/kết quả; `DELETE` để hủy.
-- `GET /api/config`: tình trạng cấu hình không chứa secret.
-- `GET /api/saydi/samples`, `POST /api/saydi/speech`: proxy SaydiVoice cùng origin.
+Kiểm tra mã nguồn:
 
 ```bash
 pnpm lint
@@ -54,9 +47,3 @@ pnpm typecheck
 pnpm test
 pnpm build
 ```
-
-## Giới hạn hiện tại
-
-- Chưa có đăng nhập; các endpoint tạo AI và giọng đọc trên deployment công khai có thể tiêu hao credits của chủ tài khoản. Blob đang ở chế độ public để trình duyệt và Workflow đọc được media; không tải nội dung nhạy cảm lên deployment công khai.
-- Bản dựng và unit test không xác nhận AI Gateway, SaydiVoice hay Blob có credits/permission trong tài khoản triển khai. Cần kiểm thử một luồng ảnh/video thực tế trên production.
-- Tệp video rất lớn có thể vượt giới hạn đĩa tạm, bộ nhớ hoặc thời gian của Function khi FFmpeg dựng MP4. Nên bắt đầu bằng clip ngắn và kiểm tra Workflow logs.
