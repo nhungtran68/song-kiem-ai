@@ -1,0 +1,10 @@
+allowBuilds:
+  '@swc/core': true
+  cbor-extract: true
+  esbuild: true
+  ffmpeg-static: true
+  unrs-resolver: true
+minimumReleaseAgeExclude:
+  - '@ai-sdk/gateway@4.0.127'
+  - '@ai-sdk/provider-utils@5.0.69'
+  - ai@7.0.154

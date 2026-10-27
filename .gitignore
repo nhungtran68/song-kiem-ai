@@ -1,0 +1,27 @@
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+
+# tests and builds
+/coverage
+/.next
+/out
+/dist
+
+# local runtime data
+/.workflow
+/tmp
+
+# environment files
+.env*
+!.env.example
+
+# Vercel project binding
+.vercel
+
+# OS/editor
+.DS_Store
+Thumbs.db
+*.tsbuildinfo
+/.swc
