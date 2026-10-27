@@ -1,5 +1,6 @@
-import type { DialogueLine, VoicePair } from "../types/studio";
+import type { DialogueLine, VoiceMode, VoicePair } from "../types/studio";
 import { requestSpeechClip, type SpeechCache } from "./speech-client";
+import { readerForSpeaker } from "./voices";
 
 export type AudioJoinMode = "continuous" | "timeline";
 export type PcmClip = { pcm: ArrayBuffer; start: number };
@@ -56,17 +57,18 @@ export function mergePcmClips(clips: PcmClip[], sampleRate: number, mode: AudioJ
 }
 
 export async function createFullAudio(options: {
-  lines: DialogueLine[]; voiceIds: VoicePair; mode: AudioJoinMode; minimumDuration: number;
+  lines: DialogueLine[]; voiceIds: VoicePair; voiceMode?: VoiceMode; mode: AudioJoinMode; minimumDuration: number;
   signal: AbortSignal; cache: SpeechCache;
   onProgress: (completed: number, total: number, text: string) => void;
 }) {
-  const { lines, voiceIds, mode, minimumDuration, signal, cache, onProgress } = options;
+  const { lines, voiceIds, voiceMode = "dual", mode, minimumDuration, signal, cache, onProgress } = options;
   const ordered = lines.filter((line) => line.text.trim()).sort((a, b) => a.start - b.start);
   if (!ordered.length) throw new Error("Chưa có lời thoại. Hãy phân tích hoặc thêm câu trước khi tạo âm thanh.");
   if (ordered.length > 500) throw new Error("Hãy chia kịch bản thành các phần tối đa 500 câu.");
   if (mode === "timeline" && minimumDuration > MAX_AUDIO_SECONDS) throw new Error("Xuất theo timeline hỗ trợ tối đa 30 phút. Hãy chia kịch bản hoặc chọn Nối liên tục.");
   for (const [index, line] of ordered.entries()) {
-    if (!voiceIds[line.speaker]?.trim()) throw new Error(`Thiếu Voice ID của nhân vật ${line.speaker === "male" ? "nam" : "nữ"}.`);
+    const reader = readerForSpeaker(line.speaker, voiceMode);
+    if (!voiceIds[reader]?.trim()) throw new Error(`Thiếu Voice ID giọng ${reader === "male" ? "nam" : "nữ"}.`);
     if (!Number.isFinite(line.start) || !Number.isFinite(line.end) || line.start < 0 || line.end <= line.start) throw new Error(`Mốc thời gian câu ${index + 1} chưa hợp lệ.`);
   }
   signal.throwIfAborted();
@@ -79,8 +81,9 @@ export async function createFullAudio(options: {
   try {
     for (const [index, line] of ordered.entries()) {
       signal.throwIfAborted();
-      onProgress(index, ordered.length, `Đang tạo câu ${index + 1}/${ordered.length} · giọng ${line.speaker === "male" ? "nam" : "nữ"}`);
-      const speech = await requestSpeechClip(line.text, voiceIds[line.speaker], signal, cache);
+      const reader = readerForSpeaker(line.speaker, voiceMode);
+      onProgress(index, ordered.length, `Đang tạo câu ${index + 1}/${ordered.length} · giọng ${reader === "male" ? "nam" : "nữ"}`);
+      const speech = await requestSpeechClip(line.text, voiceIds[reader], signal, cache);
       if (speech.charsCharged === null) usageKnown = false;
       else charsCharged += speech.charsCharged;
       const decoded = await context.decodeAudioData(await speech.blob.arrayBuffer());

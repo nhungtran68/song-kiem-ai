@@ -1,4 +1,5 @@
 export type Speaker = "male" | "female";
+export type VoiceMode = "dual" | "male" | "female";
 
 export type DialogueLine = {
   id: string;
@@ -33,6 +34,7 @@ export type StudioDraft = {
   style: string;
   prompt?: string;
   voiceIds: VoicePair;
+  voiceMode?: VoiceMode;
   summary: string;
   scenes: TimelineScene[];
 };
