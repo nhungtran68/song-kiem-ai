@@ -117,7 +117,7 @@ svg { width: 20px; height: 20px; }
 .prompt-field small { color: var(--muted); font-size: 10px; line-height: 1.5; }
 .prompt-field textarea { min-height: 150px; }
 .analysis-actions { flex-wrap: wrap; }
-.analysis-actions > .button { flex: 1 1 200px; }
+.setup-panel .analysis-actions > .button { flex: 1 1 220px; }
 .voice-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .field.voice > span { display: flex; align-items: center; gap: 7px; }
 .field.voice > span i { width: 8px; height: 8px; border-radius: 50%; background: #415f72; }
