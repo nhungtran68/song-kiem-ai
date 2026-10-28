@@ -35,6 +35,7 @@ export type StudioDraft = {
   prompt?: string;
   voiceIds: VoicePair;
   voiceMode?: VoiceMode;
+  analysisSource?: "ai" | "script";
   summary: string;
   scenes: TimelineScene[];
 };

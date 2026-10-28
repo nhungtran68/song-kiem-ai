@@ -4,6 +4,19 @@
 
 ## Cách dùng
 
+Nếu đã có kịch bản: dán tối đa 20.000 ký tự vào **Ý tưởng hoặc kịch bản có sẵn**, rồi bấm **Dùng kịch bản đã nhập**. Không cần ảnh/video hoặc OpenAI. Mỗi lượt thoại nên bắt đầu bằng `NAM:` hoặc `NỮ:`; nhận cả `nu:`, `Giọng nam:`, `[NỮ]`, nhãn đứng riêng và cảm xúc như `NAM (trầm):`. Ví dụ:
+
+```text
+NAM (trầm): Xin chào.
+NỮ (vui): Chào anh!
+```
+
+Có thể ghi mốc `[00:00 - 00:05] NAM: Lời thoại...`. Khi không có mốc, hệ thống ước tính theo độ dài câu, cho sửa lại trước khi tạo giọng. Đoạn dài được chia nhỏ, giữ toàn bộ lời thoại. Dòng tiếp theo dùng cùng nhân vật; văn bản không có nhãn dùng nhân vật mặc định theo chế độ giọng hiện tại. Nhãn NAM/NỮ tự chọn chế độ giọng phù hợp, vẫn giữ hai Voice ID.
+
+Khi OpenAI trả lỗi hết credits/hạn mức, giới hạn tốc độ, lỗi truy cập hoặc tạm ngừng, ứng dụng tự tách phần chữ đã nhập và ghi rõ **Kịch bản đã nhập**, không báo đã phân tích hình ảnh. Nếu chưa có chữ hoặc định dạng sai, nội dung biên tập trước đó được giữ. Không tự gọi AI lại sau lỗi quota; có nút thử lại khi bạn muốn. Tách chữ không dùng credits OpenAI; tạo giọng vẫn tính credits SaydiVoice.
+
+Nếu cần AI phân tích hình ảnh:
+
 1. Chọn ảnh hoặc video. Tệp gốc chỉ được mở trong trình duyệt, không tải lên máy chủ hay kho lưu trữ.
 2. Chọn phong cách, nhập ý tưởng tùy chọn rồi nhấn **Phân tích bằng OpenAI**. Trình duyệt lấy tối đa 8 khung hình JPEG thu nhỏ và gửi chúng qua `/api/analyze` tới OpenAI. Video gốc và âm thanh không được gửi. Vì AI chỉ thấy các khung hình mẫu, cần xem lại các chi tiết nằm giữa chúng.
 3. Sửa tóm tắt, lời thoại, nhân vật, cảm xúc và mốc thời gian. Hai Voice ID SaydiVoice được giữ riêng. Kịch bản tự lưu trong `localStorage` của trình duyệt hiện tại; ảnh/video không được lưu.

@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { analysisOutputSchema } from "../../../lib/schemas";
+import { classifyAiError } from "../../../lib/ai-errors";
+import { MAX_SCRIPT_CHARS } from "../../../lib/written-script";
 
 export const runtime = "nodejs";
 export const maxDuration = 180;
@@ -14,7 +16,7 @@ const frameSchema = z.object({
 const requestSchema = z.object({
   title: z.string().trim().max(160),
   style: z.string().trim().min(1).max(80),
-  prompt: z.string().trim().max(600),
+  prompt: z.string().trim().max(MAX_SCRIPT_CHARS),
   mediaKind: z.enum(["image", "video"]),
   duration: z.number().min(0).max(7_200),
   frames: z.array(frameSchema).min(1).max(8),
@@ -66,7 +68,7 @@ const scriptSchema = {
 
 export async function POST(request: Request) {
   const key = process.env.OPENAI_API_KEY;
-  if (!key) return NextResponse.json({ error: "Chưa cài OPENAI_API_KEY trên Vercel." }, { status: 503 });
+  if (!key) return NextResponse.json({ error: "Chưa cài OPENAI_API_KEY trên Vercel.", code: "AI_NOT_CONFIGURED", fallbackAllowed: true }, { status: 503 });
 
   const size = Number(request.headers.get("content-length") || 0);
   if (size > MAX_BODY_BYTES) return NextResponse.json({ error: "Các khung hình quá lớn. Hãy thử video ngắn hơn." }, { status: 413 });
@@ -116,20 +118,23 @@ export async function POST(request: Request) {
       signal: AbortSignal.timeout(150_000),
     });
   } catch {
-    return NextResponse.json({ error: "Không kết nối được OpenAI hoặc yêu cầu đã hết thời gian." }, { status: 502 });
+    return NextResponse.json({ error: "Không kết nối được OpenAI hoặc yêu cầu đã hết thời gian.", code: "AI_UNAVAILABLE", fallbackAllowed: true }, { status: 502 });
   }
 
   if (!upstream.ok) {
-    const body = await upstream.json().catch(() => null) as { error?: { message?: string } } | null;
+    const body = await upstream.json().catch(() => null) as { error?: { message?: string; code?: string; type?: string } } | null;
     const retryAfter = upstream.headers.get("retry-after");
-    const error = upstream.status === 401
+    const classification = classifyAiError(upstream.status, body?.error);
+    const error = classification.code === "AI_QUOTA_EXHAUSTED"
+      ? "OpenAI đã hết credits hoặc đạt hạn mức sử dụng. Có thể tiếp tục bằng kịch bản đã nhập."
+      : upstream.status === 401
       ? "OPENAI_API_KEY không hợp lệ hoặc không có quyền truy cập."
       : upstream.status === 429
         ? `OpenAI đang giới hạn yêu cầu${retryAfter ? `; thử lại sau ${retryAfter} giây` : ""}.`
         : upstream.status === 400
           ? `OpenAI từ chối yêu cầu: ${body?.error?.message || "kiểm tra model và quyền truy cập"}.`
           : `OpenAI trả về lỗi ${upstream.status}. ${body?.error?.message || "Hãy thử lại."}`;
-    return NextResponse.json({ error }, { status: upstream.status === 429 ? 429 : 502, headers: retryAfter ? { "Retry-After": retryAfter } : undefined });
+    return NextResponse.json({ error, ...classification }, { status: upstream.status === 429 ? 429 : 502, headers: retryAfter ? { "Retry-After": retryAfter } : undefined });
   }
 
   const body = await upstream.json().catch(() => null) as { choices?: Array<{ message?: { content?: string; refusal?: string } }> } | null;

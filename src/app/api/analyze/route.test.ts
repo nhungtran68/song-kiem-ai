@@ -31,7 +31,7 @@ describe("direct OpenAI analysis", () => {
     vi.stubEnv("OPENAI_API_KEY", "");
     const response = await POST(request(input));
     expect(response.status).toBe(503);
-    expect(await response.json()).toMatchObject({ error: expect.stringContaining("OPENAI_API_KEY") });
+    expect(await response.json()).toMatchObject({ error: expect.stringContaining("OPENAI_API_KEY"), code: "AI_NOT_CONFIGURED", fallbackAllowed: true });
   });
 
   it("sends only sampled frames and accepts a valid timeline", async () => {
@@ -61,5 +61,25 @@ describe("direct OpenAI analysis", () => {
     const response = await POST(request({ ...input, frames: [{ time: 20, image: "data:image/jpeg;base64,AAAA" }] }));
     expect(response.status).toBe(400);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each(["insufficient_quota", "credit_balance_exhausted", "project_spend_limit_exceeded", "organization_spend_limit_exceeded", "organization_usage_limit_exceeded"])("permits local script fallback for %s without retrying OpenAI", async (code) => {
+    vi.stubEnv("OPENAI_API_KEY", "test-secret");
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: { code, type: "insufficient_quota", message: "Limit reached" } }), {
+      status: 429, headers: { "Content-Type": "application/json", "Retry-After": "60" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await POST(request(input));
+    expect(response.status).toBe(429);
+    expect(response.headers.get("Retry-After")).toBe("60");
+    expect(await response.json()).toMatchObject({ code: "AI_QUOTA_EXHAUSTED", fallbackAllowed: true });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("distinguishes temporary throttling from exhausted credits", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "test-secret");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: { code: "rate_limit_exceeded", message: "Slow down" } }), { status: 429 })));
+    const response = await POST(request(input));
+    expect(await response.json()).toMatchObject({ code: "AI_RATE_LIMITED", fallbackAllowed: true });
   });
 });

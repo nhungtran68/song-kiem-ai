@@ -7,6 +7,7 @@ import { captureFrames, inferMediaType } from "@/lib/media";
 import { createFullAudio, type AudioJoinMode } from "@/lib/audio-export";
 import { requestSpeechClip, type SpeechCache } from "@/lib/speech-client";
 import { readerForSpeaker, VOICE_MODE_LABELS } from "@/lib/voices";
+import { MAX_SCRIPT_CHARS, parseWrittenScript } from "@/lib/written-script";
 import type { DialogueLine, StudioDraft, TimelineScene, VoiceMode, VoicePair } from "@/types/studio";
 
 export type PublicRuntimeConfig = {
@@ -79,6 +80,8 @@ export default function Studio({ config: initialConfig }: { config: PublicRuntim
   const [voiceIds, setVoiceIds] = useState<VoicePair>(config.voiceIds);
   const [voiceMode, setVoiceMode] = useState<VoiceMode>("dual");
   const [summary, setSummary] = useState("");
+  const [analysisSource, setAnalysisSource] = useState<"ai" | "script">("ai");
+  const [aiFallbackReason, setAiFallbackReason] = useState<string | null>(null);
   const [scenes, setScenes] = useState<TimelineScene[]>([]);
   const [media, setMedia] = useState<LocalMedia | null>(null);
   const [previewUrl, setPreviewUrl] = useState("");
@@ -125,6 +128,7 @@ export default function Studio({ config: initialConfig }: { config: PublicRuntim
             setVoiceIds(draft.voiceIds);
             setVoiceMode(draft.voiceMode === "male" || draft.voiceMode === "female" ? draft.voiceMode : "dual");
             setSummary(draft.summary);
+            setAnalysisSource(draft.analysisSource === "script" ? "script" : "ai");
             setScenes(draft.scenes);
           }
         }
@@ -136,9 +140,9 @@ export default function Studio({ config: initialConfig }: { config: PublicRuntim
 
   useEffect(() => {
     if (!hydrated) return;
-    const draft: StudioDraft = { version: 2, title, style, prompt, voiceIds, voiceMode, summary, scenes };
+    const draft: StudioDraft = { version: 2, title, style, prompt, voiceIds, voiceMode, analysisSource, summary, scenes };
     try { localStorage.setItem(DRAFT_KEY, JSON.stringify(draft)); } catch { /* Editing still works without draft storage. */ }
-  }, [hydrated, prompt, scenes, style, summary, title, voiceIds, voiceMode]);
+  }, [hydrated, prompt, scenes, style, summary, title, voiceIds, voiceMode, analysisSource]);
 
   useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl); }, [previewUrl]);
   useEffect(() => () => { if (audioExport) URL.revokeObjectURL(audioExport.url); }, [audioExport]);
@@ -182,13 +186,36 @@ export default function Studio({ config: initialConfig }: { config: PublicRuntim
     setMessage({ type: "info", text: "Tệp chỉ nằm trên thiết bị của bạn. Khi phân tích, trình duyệt gửi tối đa 8 khung hình tới OpenAI; không gửi video gốc hoặc âm thanh." });
   };
 
-  const analyze = async () => {
+  const applyWrittenScript = (reason = "") => {
+    if (audioRequestRef.current) return false;
+    try {
+      const parsed = parseWrittenScript(prompt, voiceMode === "female" ? "female" : "male");
+      const result = hydrateAnalysis(parsed.analysis);
+      stopSpeech();
+      setSummary(result.summary);
+      setScenes(result.scenes);
+      setAnalysisSource("script");
+      if (parsed.inferredVoiceMode) setVoiceMode(parsed.inferredVoiceMode);
+      setMessage({ type: "success", text: `${reason ? `${reason} ` : ""}Đã tách ${parsed.lineCount} đoạn từ nội dung bạn nhập.${parsed.inferredVoiceMode ? ` Tự chọn: ${VOICE_MODE_LABELS[parsed.inferredVoiceMode]}.` : ""}${parsed.estimatedTiming ? " Mốc thời gian là ước tính, có thể chỉnh lại." : " Giữ mốc thời gian đã nhập."} Chưa phân tích hình ảnh; bạn có thể tạo âm thanh ngay.` });
+      return true;
+    } catch (error) {
+      setMessage({ type: "error", text: `${reason ? `${reason} ` : ""}${errorMessage(error)}` });
+      return false;
+    }
+  };
+
+  const analyze = async (forceAi = false) => {
     if (analyzeRef.current || audioRequestRef.current) return;
+    if (prompt.trim().length > MAX_SCRIPT_CHARS) { setMessage({ type: "error", text: "Kịch bản vượt 20.000 ký tự. Hãy chia thành các phần ngắn hơn; nội dung đã nhập vẫn được giữ." }); return; }
+    if (forceAi) setAiFallbackReason(null);
     if (!file) {
-      setMessage({ type: "info", text: "Chọn ảnh hoặc video, sau đó bấm Phân tích bằng OpenAI để tạo kịch bản." });
+      if (prompt.trim()) { applyWrittenScript(); return; }
+      setMessage({ type: "info", text: "Chọn ảnh/video để dùng AI, hoặc dán kịch bản có sẵn để tách lời thoại." });
       inputRef.current?.click();
       return;
     }
+    if (aiFallbackReason && !forceAi) { applyWrittenScript(aiFallbackReason); return; }
+    if (!config.aiReady && prompt.trim() && !forceAi) { applyWrittenScript("AI chưa được cấu hình."); return; }
     const controller = new AbortController();
     analyzeRef.current = controller;
     setBusy(true);
@@ -204,11 +231,19 @@ export default function Studio({ config: initialConfig }: { config: PublicRuntim
         body: JSON.stringify({ title, style, prompt, ...captured }),
         signal: controller.signal,
       });
-      const payload = await response.json().catch(() => null) as { error?: string; analysis?: Parameters<typeof hydrateAnalysis>[0] } | null;
+      const payload = await response.json().catch(() => null) as { error?: string; code?: string; fallbackAllowed?: boolean; analysis?: Parameters<typeof hydrateAnalysis>[0] } | null;
+      if (!response.ok && payload?.fallbackAllowed) {
+        const reason = payload.error || "AI hiện không khả dụng.";
+        setAiFallbackReason(reason);
+        applyWrittenScript(reason);
+        return;
+      }
       if (!response.ok || !payload?.analysis) throw new Error(payload?.error || `Phân tích thất bại (HTTP ${response.status}).`);
       const analysis = hydrateAnalysis(payload.analysis);
       setSummary(analysis.summary);
       setScenes(analysis.scenes);
+      setAnalysisSource("ai");
+      setAiFallbackReason(null);
       setMessage({ type: "success", text: `Đã tạo ${analysis.scenes.length} cảnh. Hãy kiểm tra và sửa lời thoại trước khi xuất.` });
     } catch (error) {
       setMessage(controller.signal.aborted
@@ -328,21 +363,23 @@ export default function Studio({ config: initialConfig }: { config: PublicRuntim
       <article className="panel setup-panel"><fieldset className="studio-fields" disabled={audioBusy}><div className="panel-heading"><div><span className="section-number">02</span><h2>Thiết lập</h2></div><small>{config.aiModel}</small></div>
         <label className="field"><span>Tên dự án</span><input value={title} onChange={(event) => setTitle(event.target.value)} maxLength={160} /></label>
         <label className="field"><span>Phong cách biên kịch</span><select value={style} onChange={(event) => setStyle(event.target.value)}>{STYLES.map((item) => <option key={item}>{item}</option>)}</select></label>
-        <label className="field prompt-field"><span>Ý tưởng cho kịch bản (không bắt buộc)</span><textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} maxLength={600} placeholder="Ví dụ: Hai người bạn lâu ngày gặp lại, lời thoại vui và ngắn gọn." /><small>{prompt.length}/600 ký tự • AI dựa vào các khung hình mẫu và ý tưởng này.</small></label>
+        <label className="field prompt-field"><span>Ý tưởng hoặc kịch bản có sẵn</span><textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} aria-invalid={prompt.trim().length > MAX_SCRIPT_CHARS} placeholder={"NAM (trầm): Xin chào.\nNỮ (vui): Chào anh.\n\nCó thể thêm mốc: [00:00 - 00:05] NAM: Lời thoại..."} /><small>{prompt.length}/{MAX_SCRIPT_CHARS.toLocaleString("vi-VN")} ký tự{prompt.trim().length > MAX_SCRIPT_CHARS ? " • Nội dung quá dài, hãy chia thành các phần; hệ thống chưa cắt bớt chữ." : " • Mỗi nhân vật nên bắt đầu một dòng bằng NAM: hoặc NỮ:. Bấm Dùng kịch bản đã nhập để tách trực tiếp, không cần ảnh/video hay OpenAI."}</small></label>
         <div className="voice-grid"><label className="field voice male"><span><i /> Nhân vật nam</span><input placeholder="voice_id, ví dụ vi-adam" value={voiceIds.male} onChange={(event) => setVoiceIds((current) => ({ ...current, male: event.target.value }))} /></label><label className="field voice female"><span><i /> Nhân vật nữ</span><input placeholder="voice_id hoặc vc_..." value={voiceIds.female} onChange={(event) => setVoiceIds((current) => ({ ...current, female: event.target.value }))} /></label></div>
         <p className="voice-note">Hai Voice ID SaydiVoice được giữ riêng. Nghe thử và tạo âm thanh dùng credits theo ký tự; các đoạn đã tạo trong tab này được dùng lại. AI chỉ xem khung hình mẫu, không nghe âm thanh.</p>
-        <div className="action-row">
-          <button type="button" className="button primary" disabled={busy} aria-describedby="analysis-help" onClick={() => void analyze()}><Icon name="spark" />{busy ? "Đang phân tích..." : file ? "Phân tích bằng OpenAI" : "Chọn tệp để phân tích"}</button>
+        <div className="action-row analysis-actions">
+          <button type="button" className="button primary" disabled={busy} aria-describedby="analysis-help" onClick={() => void analyze()}><Icon name="spark" />{busy ? "Đang phân tích..." : prompt.trim() && (!file || aiFallbackReason) ? "Tách kịch bản đã nhập" : file ? "Phân tích bằng OpenAI" : "Chọn tệp để phân tích"}</button>
+          <button type="button" className="button ghost" disabled={busy} onClick={() => applyWrittenScript()}>Dùng kịch bản đã nhập</button>
           {busy && <button type="button" className="button ghost danger" onClick={() => analyzeRef.current?.abort()}><Icon name="stop" />Hủy</button>}
         </div>
-        <p id="analysis-help" className="voice-note">{file ? `Đã chọn: ${file.name}. Bấm phân tích để tạo kịch bản từ tệp này.` : "Chọn ảnh hoặc video trước khi phân tích. Chỉ nhập ý tưởng thì chưa đủ dữ liệu hình ảnh."}</p>
-        {!config.aiReady && <p className="voice-note">Để bật phân tích, thêm <code>OPENAI_API_KEY</code> vào Environment Variables trên Vercel rồi triển khai lại.</p>}
+        <p id="analysis-help" className="voice-note">{file ? `Đã chọn: ${file.name}. Có thể dùng AI phân tích tệp hoặc tách trực tiếp kịch bản bạn đã viết.` : "Có kịch bản rồi thì dán vào ô trên và bấm Dùng kịch bản đã nhập. Nếu chỉ có ý tưởng, hãy chọn ảnh/video để AI viết thêm."} Khi AI hết hạn mức, nội dung đã nhập sẽ được tách tự động. Tách chữ không dùng credits OpenAI; tạo giọng vẫn dùng credits SaydiVoice.</p>
+        {aiFallbackReason && <div className="voice-note"><p>{aiFallbackReason}</p><button type="button" className="button ghost compact" disabled={busy} onClick={() => void analyze(true)}>Thử lại bằng AI</button></div>}
+        {!config.aiReady && <p className="voice-note">Chưa cấu hình AI; bạn vẫn có thể dùng kịch bản đã nhập. Để phân tích hình ảnh, thêm <code>OPENAI_API_KEY</code> trên Vercel rồi triển khai lại.</p>}
       </fieldset>
       </article>
     </section>
     <section className="panel timeline-panel"><fieldset className="studio-fields" disabled={audioBusy}><div className="panel-heading timeline-heading"><div><span className="section-number">03</span><h2>Biên tập hội thoại</h2></div><div className="timeline-actions"><span>{allLines.length} câu • {secondsLabel(totalDuration)}</span><button className="button ghost compact" onClick={addLine}><Icon name="plus" />Thêm câu</button></div></div>
-      {summary && <div className="summary"><span>TÓM TẮT AI</span><p>{summary}</p></div>}
-      {!scenes.length ? <div className="empty-timeline"><span>✧</span><h3>Timeline đang trống</h3><p>Chạy phân tích hoặc thêm câu thủ công để bắt đầu.</p><button className="button ghost" onClick={addLine}><Icon name="plus" />Thêm câu đầu tiên</button></div> : <div className="scene-list">{scenes.map((scene, sceneIndex) => <article className="scene" key={scene.id}>
+      {summary && <div className="summary"><span>{analysisSource === "script" ? "KỊCH BẢN ĐÃ NHẬP" : "TÓM TẮT AI"}</span><p>{summary}</p></div>}
+      {!scenes.length ? <div className="empty-timeline"><span>✧</span><h3>Timeline đang trống</h3><p>Dùng kịch bản đã nhập, chạy phân tích hoặc thêm câu thủ công.</p><button className="button ghost" onClick={addLine}><Icon name="plus" />Thêm câu đầu tiên</button></div> : <div className="scene-list">{scenes.map((scene, sceneIndex) => <article className="scene" key={scene.id}>
         <header><span>CẢNH {String(sceneIndex + 1).padStart(2, "0")}</span><p>{scene.visual}</p><time>{secondsLabel(scene.start)} - {secondsLabel(scene.end)}</time></header>
         <div className="lines">{scene.lines.map((line) => {
           const reader = readerForSpeaker(line.speaker, voiceMode);
