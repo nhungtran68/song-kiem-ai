@@ -8,7 +8,11 @@ export async function GET() {
   if (!(await isAdmin())) return Response.json({ error: "Vui lòng đăng nhập quản trị." }, { status: 401 });
   try {
     const [library, catalogue] = await Promise.all([readVoiceLibrary(), loadCatalogue()]);
-    return Response.json({ ...library, catalogue: catalogue.voices, warnings: catalogue.warnings }, { headers: { "Cache-Control": "no-store" } });
+    const voices = library.voices.map((voice) => {
+      const current = catalogue.voices.find((row) => row.id === voice.id);
+      return current ? { ...voice, name: current.name, language: current.language } : voice;
+    });
+    return Response.json({ ...library, voices, catalogue: catalogue.voices, warnings: catalogue.warnings }, { headers: { "Cache-Control": "no-store" } });
   } catch { return Response.json({ error: "Không tải được thư viện giọng. Danh sách đã lưu vẫn được giữ." }, { status: 503 }); }
 }
 export async function PUT(request: Request) {
