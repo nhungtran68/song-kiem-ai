@@ -1,18 +1,19 @@
-import type { DialogueLine, Speaker, VoiceMode } from "../types/studio";
+import type { Characters, DialogueLine, Speaker, VoiceMode } from "../types/studio";
+import { DEFAULT_CHARACTERS } from "./voices";
 
 export const MAX_SCRIPT_CHARS = 20_000;
 type ScriptLine = Omit<DialogueLine, "id">;
 type TimeRange = { start: number; end: number };
 type Turn = { speaker: Speaker; emotion: string; text: string; range?: TimeRange };
 
-const roleWithSeparator = /^(?:[-*•]\s*)?(?:(?:giọng|nhân vật)\s+)?(nam|nữ|nu)\s*(?:\(([^)\n]{1,80})\)|\[([^\]\n]{1,80})\])?\s*[:：–—-]\s*/iu;
-const bracketedRole = /^(?:[-*•]\s*)?\[\s*(nam|nữ|nu)\s*\]\s*(?:\(([^)\n]{1,80})\))?\s*(?:[:：–—-]\s*)?/iu;
-const roleHeading = /^(?:[-*•]\s*)?(?:(?:giọng|nhân vật)\s+)?(nam|nữ|nu)\s*(?:\(([^)\n]{1,80})\))?\s*$/iu;
+const roleWithSeparator = /^(?:[-*•]\s*)?(?:(?:giọng|nhân vật)\s+)?(a|b|nam|nữ|nu)\s*(?:\(([^)\n]{1,80})\)|\[([^\]\n]{1,80})\])?\s*[:：–—-]\s*/iu;
+const bracketedRole = /^(?:[-*•]\s*)?\[\s*(a|b|nam|nữ|nu)\s*\]\s*(?:\(([^)\n]{1,80})\))?\s*(?:[:：–—-]\s*)?/iu;
+const roleHeading = /^(?:[-*•]\s*)?(?:(?:giọng|nhân vật)\s+)?(a|b|nam|nữ|nu)\s*(?:\(([^)\n]{1,80})\))?\s*$/iu;
 const rangePrefix = /^\[\s*(\d{1,2}(?::\d{1,2}){0,2}(?:[.,]\d{1,3})?)\s*(?:-->|[–—-])\s*(\d{1,2}(?::\d{1,2}){0,2}(?:[.,]\d{1,3})?)\s*\]\s*(?:\|\s*)?/u;
 
-function extractRole(content: string) {
+function extractRole(content: string, characters: Characters) {
   let candidate = content.replace(/^(?:[-*•]\s+|\d+[.)]\s+)/u, "");
-  const bold = /^\*\*((?:(?:giọng|nhân vật)\s+)?(?:nam|nữ|nu)(?:\s*\([^*)\n]{1,80}\))?\s*[:：–—-]?)\*\*\s*([:：–—-]?)\s*/iu.exec(candidate);
+  const bold = /^\*\*((?:(?:giọng|nhân vật)\s+)?(?:a|b|nam|nữ|nu)(?:\s*\([^*)\n]{1,80}\))?\s*[:：–—-]?)\*\*\s*([:：–—-]?)\s*/iu.exec(candidate);
   if (bold) {
     const label = bold[1].trim();
     const separator = bold[2] || (/[:：–—-]$/u.test(label) ? "" : ":");
@@ -20,7 +21,10 @@ function extractRole(content: string) {
   }
   const label = roleWithSeparator.exec(candidate) || bracketedRole.exec(candidate) || roleHeading.exec(candidate);
   if (!label) return null;
-  return { speaker: label[1].toLocaleLowerCase("vi") === "nam" ? "male" as const : "female" as const, emotion: (label[2] || label[3] || "Tự nhiên").trim(), text: candidate.slice(label[0].length).trim() };
+  const role = label[1].toLocaleLowerCase("vi");
+  const gender = role === "nam" ? "male" : "female";
+  const speaker: Speaker = role === "a" || role === "b" ? role : (["a", "b"] as const).find((id) => characters[id].gender === gender) || (gender === "male" ? "a" : "b");
+  return { speaker, emotion: (label[2] || label[3] || "Tự nhiên").trim(), text: candidate.slice(label[0].length).trim() };
 }
 
 function timeInSeconds(text: string): number {
@@ -45,7 +49,7 @@ function splitLongTurn(text: string): string[] {
   return chunks;
 }
 
-export function parseWrittenScript(input: string, defaultSpeaker: Speaker = "male") {
+export function parseWrittenScript(input: string, defaultSpeaker: Speaker = "a", characters: Characters = DEFAULT_CHARACTERS) {
   const source = input.trim();
   if (!source) throw new Error("Hãy dán kịch bản vào ô Ý tưởng hoặc kịch bản có sẵn.");
   if (source.length > MAX_SCRIPT_CHARS) throw new Error("Kịch bản vượt 20.000 ký tự. Hãy chia thành các phần ngắn hơn.");
@@ -53,11 +57,11 @@ export function parseWrittenScript(input: string, defaultSpeaker: Speaker = "mal
   // Ordinary phrases such as “Việt Nam” and “nam nữ” stay in the dialogue.
   const normalizedSource = source.replace(/\r\n?/g, "\n").replace(/\uFEFF/g, "");
   const normalized = normalizedSource
-    .replace(/([.!?…;])\s+(?=(?:(?:giọng|nhân vật)\s+)?(?:\[\s*)?(?:nam|nữ|nu)(?:\s*\])?\s*(?:\([^)]*\)\s*)?[:：–—-])/giu, (match: string, punctuation: string, offset: number) => {
+    .replace(/([.!?…;])\s+(?=(?:(?:giọng|nhân vật)\s+)?(?:\[\s*)?(?:a|b|nam|nữ|nu)(?:\s*\])?\s*(?:\([^)]*\)\s*)?[:：–—-])/giu, (match: string, punctuation: string, offset: number) => {
       const prefix = normalizedSource.slice(normalizedSource.lastIndexOf("\n", offset) + 1, offset);
       return /^\s*\d+$/u.test(prefix) ? match : `${punctuation}\n`;
     })
-    .replace(/\s*\|\s*(?=(?:(?:giọng|nhân vật)\s+)?(?:nam|nữ|nu)\s*[:：–—-])/giu, "\n");
+    .replace(/\s*\|\s*(?=(?:(?:giọng|nhân vật)\s+)?(?:a|b|nam|nữ|nu)\s*[:：–—-])/giu, "\n");
   const turns: Turn[] = [];
   let activeSpeaker = defaultSpeaker;
   let activeEmotion = "Tự nhiên";
@@ -78,7 +82,7 @@ export function parseWrittenScript(input: string, defaultSpeaker: Speaker = "mal
       if (range.end <= range.start || range.end > 7_200) throw new Error("Mốc kết thúc phải lớn hơn mốc bắt đầu và không vượt 2 giờ.");
       content = content.slice(time[0].length).trim();
     }
-    const label = extractRole(content);
+    const label = extractRole(content, characters);
     if (label) {
       flush();
       activeSpeaker = label.speaker;
@@ -93,7 +97,7 @@ export function parseWrittenScript(input: string, defaultSpeaker: Speaker = "mal
     } else current.text += `\n${content}`;
   }
   flush();
-  if (!turns.length) throw new Error("Chưa có lời thoại sau nhãn NAM/NỮ. Hãy thêm nội dung cần đọc.");
+  if (!turns.length) throw new Error("Chưa có lời thoại sau nhãn A/B hoặc NAM/NỮ. Hãy thêm nội dung cần đọc.");
 
   const lines: ScriptLine[] = [];
   let cursor = 0;
@@ -129,7 +133,7 @@ export function parseWrittenScript(input: string, defaultSpeaker: Speaker = "mal
   });
   return {
     analysis: {
-      summary: `Đã tách ${lines.length} đoạn từ kịch bản đã nhập, giữ nguyên lời thoại.${recognizedLabels ? " Giọng đọc được nhận diện theo nhãn NAM/NỮ." : ` Chưa có nhãn NAM/NỮ; các đoạn đang gán cho nhân vật ${defaultSpeaker === "male" ? "nam" : "nữ"}.`}${estimatedTiming ? " Mốc thời gian là ước tính theo độ dài lời thoại, bạn có thể chỉnh lại." : " Giữ mốc thời gian đã nhập."}`,
+      summary: `Đã tách ${lines.length} đoạn từ kịch bản đã nhập, giữ nguyên lời thoại.${recognizedLabels ? " Nhận diện nhãn A/B hoặc NAM/NỮ theo giới tính nhân vật đã chọn." : ` Chưa có nhãn; các đoạn đang gán cho nhân vật ${defaultSpeaker.toUpperCase()}.`}${estimatedTiming ? " Mốc thời gian là ước tính theo độ dài lời thoại, bạn có thể chỉnh lại." : " Giữ mốc thời gian đã nhập."}`,
       scenes,
     },
     inferredVoiceMode,

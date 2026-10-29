@@ -68,7 +68,7 @@ export async function createFullAudio(options: {
   if (mode === "timeline" && minimumDuration > MAX_AUDIO_SECONDS) throw new Error("Xuất theo timeline hỗ trợ tối đa 30 phút. Hãy chia kịch bản hoặc chọn Nối liên tục.");
   for (const [index, line] of ordered.entries()) {
     const reader = readerForSpeaker(line.speaker, voiceMode);
-    if (!voiceIds[reader]?.trim()) throw new Error(`Thiếu Voice ID giọng ${reader === "male" ? "nam" : "nữ"}.`);
+    if (!voiceIds[reader]?.trim()) throw new Error(`Thiếu Voice ID nhân vật ${reader.toUpperCase()}.`);
     if (!Number.isFinite(line.start) || !Number.isFinite(line.end) || line.start < 0 || line.end <= line.start) throw new Error(`Mốc thời gian câu ${index + 1} chưa hợp lệ.`);
   }
   signal.throwIfAborted();
@@ -82,7 +82,7 @@ export async function createFullAudio(options: {
     for (const [index, line] of ordered.entries()) {
       signal.throwIfAborted();
       const reader = readerForSpeaker(line.speaker, voiceMode);
-      onProgress(index, ordered.length, `Đang tạo câu ${index + 1}/${ordered.length} · giọng ${reader === "male" ? "nam" : "nữ"}`);
+      onProgress(index, ordered.length, `Đang tạo câu ${index + 1}/${ordered.length} · nhân vật ${reader.toUpperCase()}`);
       const speech = await requestSpeechClip(line.text, voiceIds[reader], signal, cache);
       if (speech.charsCharged === null) usageKnown = false;
       else charsCharged += speech.charsCharged;

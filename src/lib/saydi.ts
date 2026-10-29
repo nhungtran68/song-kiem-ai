@@ -45,7 +45,7 @@ async function readError(response: Response): Promise<{ message: string; code: s
 }
 
 export async function saydiFetch(
-  path: "/samples" | "/v1/audio/speech" | "/v1/voices" | "/tts/clone",
+  path: "/samples" | "/v1/audio/speech" | "/v1/voices" | "/tts/clone" | `/samples/${string}/audio` | `/v1/voices/${string}/preview`,
   init: RequestInit = {},
 ): Promise<Response> {
   const key = process.env.SAYDI_API_KEY;

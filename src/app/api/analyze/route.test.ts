@@ -44,13 +44,13 @@ describe("direct OpenAI analysis", () => {
       expect(body.response_format.json_schema.strict).toBe(true);
       return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({
         summary: "Quan sát hai người; cuộc hội thoại là hư cấu.",
-        scenes: [{ start: 0, end: 6, visual: "Hai người đối diện", lines: [{ speaker: "female", text: "Chào anh!", emotion: "Vui", start: 1, end: 3 }] }],
+        scenes: [{ start: 0, end: 6, visual: "Hai người đối diện", lines: [{ speaker: "b", text: "Chào anh!", emotion: "Vui", start: 1, end: 3 }] }],
       }) } }] }), { status: 200 });
     });
     vi.stubGlobal("fetch", fetchMock);
     const response = await POST(request(input));
     expect(response.status).toBe(200);
-    expect((await response.json()).analysis.scenes[0].lines[0].speaker).toBe("female");
+    expect((await response.json()).analysis.scenes[0].lines[0].speaker).toBe("b");
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 

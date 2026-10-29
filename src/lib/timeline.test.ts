@@ -9,12 +9,12 @@ describe("timeline helpers", () => {
 
   it("sorts dialogue and removes newlines in SRT", () => {
     const output = createSrt([
-      { speaker: "female", text: "Câu\nhai", start: 2, end: 4 },
-      { speaker: "male", text: "Câu một", start: 0, end: 2 },
+      { speaker: "b", text: "Câu\nhai", start: 2, end: 4 },
+      { speaker: "a", text: "Câu một", start: 0, end: 2 },
     ]);
-    expect(output).toContain("NAM: Câu một");
-    expect(output).toContain("NỮ: Câu hai");
-    expect(output.indexOf("NAM")).toBeLessThan(output.indexOf("NỮ"));
+    expect(output).toContain("NHÂN VẬT A: Câu một");
+    expect(output).toContain("NHÂN VẬT B: Câu hai");
+    expect(output.indexOf("VẬT A")).toBeLessThan(output.indexOf("VẬT B"));
   });
 
   it("hydrates stable editor IDs without changing content", () => {
@@ -24,7 +24,7 @@ describe("timeline helpers", () => {
         start: 0,
         end: 3,
         visual: "Hai người gặp nhau",
-        lines: [{ speaker: "male", text: "Xin chào", emotion: "Vui", start: 0, end: 2 }],
+        lines: [{ speaker: "a", text: "Xin chào", emotion: "Vui", start: 0, end: 2 }],
       }],
     });
     expect(result.scenes[0].id).toMatch(/^scene-/);

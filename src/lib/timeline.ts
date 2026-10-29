@@ -22,7 +22,7 @@ export function createSrt(lines: Pick<DialogueLine, "speaker" | "text" | "start"
     .filter((line) => line.text.trim() && line.end > line.start)
     .sort((a, b) => a.start - b.start)
     .map((line, index) => {
-      const speaker = line.speaker === "male" ? "NAM" : "NỮ";
+      const speaker = `NHÂN VẬT ${line.speaker.toUpperCase()}`;
       const text = line.text.replace(/\r?\n/g, " ").trim();
       return `${index + 1}\n${srtTimestamp(line.start)} --> ${srtTimestamp(line.end)}\n${speaker}: ${text}\n`;
     })
@@ -36,7 +36,7 @@ export function hydrateAnalysis(result: {
     end: number;
     visual: string;
     lines: Array<{
-      speaker: "male" | "female";
+      speaker: "a" | "b";
       text: string;
       emotion: string;
       start: number;

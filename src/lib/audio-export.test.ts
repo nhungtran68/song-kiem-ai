@@ -48,16 +48,16 @@ describe("full dialogue WAV", () => {
 
   it("rejects missing voices before creating audio or spending credits", async () => {
     await expect(createFullAudio({
-      lines: [{ id: "1", speaker: "female", text: "Xin chào", emotion: "Vui", start: 0, end: 1 }],
-      voiceIds: { male: "vi-adam", female: "" }, mode: "continuous", minimumDuration: 1,
+      lines: [{ id: "1", speaker: "b", text: "Xin chào", emotion: "Vui", start: 0, end: 1 }],
+      voiceIds: { a: "vi-adam", b: "" }, mode: "continuous", minimumDuration: 1,
       signal: new AbortController().signal, cache: new Map(), onProgress: () => {},
     })).rejects.toThrow("Thiếu Voice ID");
   });
 
   it.each([
-    { mode: "dual" as const, voices: { male: "vi-adam", female: "vi-cuppy" }, expected: ["vi-adam", "vi-cuppy"] },
-    { mode: "male" as const, voices: { male: "vi-adam", female: "" }, expected: ["vi-adam", "vi-adam"] },
-    { mode: "female" as const, voices: { male: "", female: "vi-cuppy" }, expected: ["vi-cuppy", "vi-cuppy"] },
+    { mode: "dual" as const, voices: { a: "vi-adam", b: "vi-cuppy" }, expected: ["vi-adam", "vi-cuppy"] },
+    { mode: "a" as const, voices: { a: "vi-adam", b: "" }, expected: ["vi-adam", "vi-adam"] },
+    { mode: "b" as const, voices: { a: "", b: "vi-cuppy" }, expected: ["vi-cuppy", "vi-cuppy"] },
   ])("keeps both dialogue lines and uses the selected $mode voice mode", async ({ mode, voices, expected }) => {
     const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
       const body = JSON.parse(String(init.body));
@@ -71,8 +71,8 @@ describe("full dialogue WAV", () => {
     });
     const result = await createFullAudio({
       lines: [
-        { id: "1", speaker: "male", text: "Câu thứ nhất", emotion: "Vui", start: 0, end: 1 },
-        { id: "2", speaker: "female", text: "Câu thứ hai", emotion: "Vui", start: 1, end: 2 },
+        { id: "1", speaker: "a", text: "Câu thứ nhất", emotion: "Vui", start: 0, end: 1 },
+        { id: "2", speaker: "b", text: "Câu thứ hai", emotion: "Vui", start: 1, end: 2 },
       ],
       voiceIds: voices, voiceMode: mode, mode: "continuous", minimumDuration: 2,
       signal: new AbortController().signal, cache: new Map(), onProgress: () => {},

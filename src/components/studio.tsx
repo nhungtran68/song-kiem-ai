@@ -6,9 +6,10 @@ import { createSrt, hydrateAnalysis, secondsLabel } from "@/lib/timeline";
 import { captureFrames, inferMediaType } from "@/lib/media";
 import { createFullAudio, type AudioJoinMode } from "@/lib/audio-export";
 import { requestSpeechClip, type SpeechCache } from "@/lib/speech-client";
-import { readerForSpeaker, VOICE_MODE_LABELS } from "@/lib/voices";
+import { readerForSpeaker, VOICE_MODE_LABELS, DEFAULT_CHARACTERS, CHARACTER_LABELS, migrateDraft } from "@/lib/voices";
+import Link from "next/link";
 import { MAX_SCRIPT_CHARS, parseWrittenScript } from "@/lib/written-script";
-import type { DialogueLine, StudioDraft, TimelineScene, VoiceMode, VoicePair } from "@/types/studio";
+import type { Characters, DialogueLine, Gender, StudioDraft, TimelineScene, VoiceChoice, VoiceMode, VoicePair } from "@/types/studio";
 
 export type PublicRuntimeConfig = {
   aiReady: boolean;
@@ -21,7 +22,7 @@ export type PublicRuntimeConfig = {
 type LocalMedia = { name: string; size: number; type: string; duration: number };
 type Notice = { type: "error" | "info" | "success"; text: string };
 const STYLES = ["Điện ảnh", "Hài hước", "Lãng mạn", "Kịch tính", "Đời thường", "Cổ trang"];
-const DRAFT_KEY = "song-kiem-ai-draft-v2";
+const DRAFT_KEY = "song-kiem-ai-draft-v3";
 
 function Icon({ name }: { name: "upload" | "spark" | "plus" | "trash" | "play" | "download" | "stop" }) {
   const paths = {
@@ -45,7 +46,7 @@ function errorMessage(value: unknown) {
 }
 
 function makeLine(start = 0, end = 3): DialogueLine {
-  return { id: crypto.randomUUID(), speaker: "male", text: "", emotion: "Tự nhiên", start, end };
+  return { id: crypto.randomUUID(), speaker: "a", text: "", emotion: "Tự nhiên", start, end };
 }
 
 function makeScene(duration: number): TimelineScene {
@@ -79,6 +80,9 @@ export default function Studio({ config: initialConfig }: { config: PublicRuntim
   const [prompt, setPrompt] = useState("");
   const [voiceIds, setVoiceIds] = useState<VoicePair>(config.voiceIds);
   const [voiceMode, setVoiceMode] = useState<VoiceMode>("dual");
+  const [characters, setCharacters] = useState<Characters>(DEFAULT_CHARACTERS);
+  const [voiceLibrary, setVoiceLibrary] = useState<VoiceChoice[]>([]);
+  const [libraryError, setLibraryError] = useState("");
   const [summary, setSummary] = useState("");
   const [analysisSource, setAnalysisSource] = useState<"ai" | "script">("ai");
   const [aiFallbackReason, setAiFallbackReason] = useState<string | null>(null);
@@ -105,6 +109,10 @@ export default function Studio({ config: initialConfig }: { config: PublicRuntim
   useEffect(() => {
     const controller = new AbortController();
     const refresh = () => {
+      void fetch("/api/voices", { cache: "no-store", signal: controller.signal }).then(async (response) => {
+        if (!response.ok) throw new Error("Chưa tải được danh sách giọng. Hãy tải lại trang.");
+        setVoiceLibrary((await response.json()).voices); setLibraryError("");
+      }).catch((error) => { if (!controller.signal.aborted) setLibraryError(errorMessage(error)); });
       void fetch("/api/config", { cache: "no-store", signal: controller.signal })
         .then(async (response) => {
           if (response.ok) setConfig(await response.json() as PublicRuntimeConfig);
@@ -118,15 +126,16 @@ export default function Studio({ config: initialConfig }: { config: PublicRuntim
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
       try {
-        const raw = localStorage.getItem(DRAFT_KEY) || localStorage.getItem("song-kiem-ai-draft-v1");
+        const raw = localStorage.getItem(DRAFT_KEY) || localStorage.getItem("song-kiem-ai-draft-v2") || localStorage.getItem("song-kiem-ai-draft-v1");
         if (raw) {
-          const draft = JSON.parse(raw) as StudioDraft;
-          if (draft.version === 1 || draft.version === 2) {
+          const draft = migrateDraft(JSON.parse(raw));
+          if (draft) {
             setTitle(draft.title);
             setStyle(draft.style);
             setPrompt(draft.prompt || "");
             setVoiceIds(draft.voiceIds);
-            setVoiceMode(draft.voiceMode === "male" || draft.voiceMode === "female" ? draft.voiceMode : "dual");
+            setVoiceMode(draft.voiceMode === "a" || draft.voiceMode === "b" ? draft.voiceMode : "dual");
+            setCharacters(draft.characters);
             setSummary(draft.summary);
             setAnalysisSource(draft.analysisSource === "script" ? "script" : "ai");
             setScenes(draft.scenes);
@@ -140,9 +149,9 @@ export default function Studio({ config: initialConfig }: { config: PublicRuntim
 
   useEffect(() => {
     if (!hydrated) return;
-    const draft: StudioDraft = { version: 2, title, style, prompt, voiceIds, voiceMode, analysisSource, summary, scenes };
+    const draft: StudioDraft = { version: 3, title, style, prompt, voiceIds, voiceMode, characters, analysisSource, summary, scenes };
     try { localStorage.setItem(DRAFT_KEY, JSON.stringify(draft)); } catch { /* Editing still works without draft storage. */ }
-  }, [hydrated, prompt, scenes, style, summary, title, voiceIds, voiceMode, analysisSource]);
+  }, [hydrated, prompt, scenes, style, summary, title, voiceIds, voiceMode, characters, analysisSource]);
 
   useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl); }, [previewUrl]);
   useEffect(() => () => { if (audioExport) URL.revokeObjectURL(audioExport.url); }, [audioExport]);
@@ -189,7 +198,7 @@ export default function Studio({ config: initialConfig }: { config: PublicRuntim
   const applyWrittenScript = (reason = "") => {
     if (audioRequestRef.current) return false;
     try {
-      const parsed = parseWrittenScript(prompt, voiceMode === "female" ? "female" : "male");
+      const parsed = parseWrittenScript(prompt, voiceMode === "b" ? "b" : "a", characters);
       const result = hydrateAnalysis(parsed.analysis);
       stopSpeech();
       setSummary(result.summary);
@@ -228,7 +237,7 @@ export default function Studio({ config: initialConfig }: { config: PublicRuntim
       const response = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, style, prompt, ...captured }),
+        body: JSON.stringify({ title, style, prompt, characters, ...captured }),
         signal: controller.signal,
       });
       const payload = await response.json().catch(() => null) as { error?: string; code?: string; fallbackAllowed?: boolean; analysis?: Parameters<typeof hydrateAnalysis>[0] } | null;
@@ -318,7 +327,7 @@ export default function Studio({ config: initialConfig }: { config: PublicRuntim
         onProgress: (completed, total, text) => setAudioProgress({ completed, total, text }),
       });
       controller.signal.throwIfAborted();
-      const name = `${safeName(title)}-am-thanh-${voiceMode === "dual" ? "hai-giong" : voiceMode === "male" ? "giong-nam" : "giong-nu"}.wav`;
+      const name = `${safeName(title)}-am-thanh-${voiceMode === "dual" ? "hai-nhan-vat" : `nhan-vat-${voiceMode}`}.wav`;
       const url = URL.createObjectURL(result.blob);
       setAudioExport({ url, name, duration: result.duration, signature: audioSignature });
       triggerDownload(url, name);
@@ -332,10 +341,10 @@ export default function Studio({ config: initialConfig }: { config: PublicRuntim
   };
 
   const exportScript = () => {
-    const text = [title, `Phong cách: ${style}`, `Chế độ giọng đọc: ${VOICE_MODE_LABELS[voiceMode]}`, `Giọng nam: ${voiceIds.male || "chưa đặt"}`, `Giọng nữ: ${voiceIds.female || "chưa đặt"}`, "", summary, "",
+    const text = [title, `Phong cách: ${style}`, `Chế độ giọng đọc: ${VOICE_MODE_LABELS[voiceMode]}`, ...(["a", "b"] as const).map((role) => `${CHARACTER_LABELS[role]} (${characters[role].gender === "male" ? "nam" : "nữ"}): ${voiceIds[role] || "chưa đặt"}`), "", summary, "",
       ...scenes.flatMap((scene, index) => [
         `CẢNH ${index + 1} [${secondsLabel(scene.start)}–${secondsLabel(scene.end)}]: ${scene.visual}`,
-        ...scene.lines.map((line) => `[${secondsLabel(line.start)}–${secondsLabel(line.end)}] ${line.speaker === "male" ? "NAM" : "NỮ"} (${line.emotion}): ${line.text}`), "",
+        ...scene.lines.map((line) => `[${secondsLabel(line.start)}–${secondsLabel(line.end)}] ${CHARACTER_LABELS[line.speaker]} (${line.emotion}): ${line.text}`), "",
       ])].join("\n");
     downloadText(`${safeName(title)}-kich-ban.txt`, text, "text/plain;charset=utf-8");
   };
@@ -343,7 +352,7 @@ export default function Studio({ config: initialConfig }: { config: PublicRuntim
   return <main className="app-shell">
     <header className="topbar">
       <a className="brand" href="#top" aria-label="Song Kiếm AI"><span className="brand-mark"><b>⚔</b><i /></span><span><strong>Song Kiếm</strong><small>AI STUDIO</small></span></a>
-      <div className="runtime-status" aria-label="Trạng thái dịch vụ"><StatusDot ok label="Media" /><StatusDot ok={config.aiReady} label="Vision" /><StatusDot ok={config.saydiReady && config.saydiSpeechSchemaReady} label="Voice" /></div>
+      <div className="topbar-actions"><Link className="admin-link" href="/admin/voices">Quản lý giọng</Link><div className="runtime-status" aria-label="Trạng thái dịch vụ"><StatusDot ok label="Media" /><StatusDot ok={config.aiReady} label="Vision" /><StatusDot ok={config.saydiReady && config.saydiSpeechSchemaReady} label="Voice" /></div></div>
     </header>
     <section className="hero" id="top"><div><p className="eyebrow">AI VIDEO DIALOGUE WORKSPACE</p><h1>Một khung hình.<br /><em>Hai giọng kể.</em></h1><p className="hero-copy">Chọn ảnh hoặc video, để OpenAI gợi ý kịch bản hai nhân vật theo thời gian, rồi xuất lời thoại và phụ đề để ghép ở ngoài.</p></div>
       <div className="process-rail" aria-label="Quy trình">{["Chọn tệp", "Phân tích", "Biên tập", "Xuất kịch bản"].map((label, index) => <div className={index === 0 || (index === 1 && scenes.length) || (index === 2 && allLines.length) || (index === 3 && scenes.length) ? "active" : ""} key={label}><span>0{index + 1}</span><b>{label}</b></div>)}</div>
@@ -363,8 +372,25 @@ export default function Studio({ config: initialConfig }: { config: PublicRuntim
       <article className="panel setup-panel"><fieldset className="studio-fields" disabled={audioBusy}><div className="panel-heading"><div><span className="section-number">02</span><h2>Thiết lập</h2></div><small>{config.aiModel}</small></div>
         <label className="field"><span>Tên dự án</span><input value={title} onChange={(event) => setTitle(event.target.value)} maxLength={160} /></label>
         <label className="field"><span>Phong cách biên kịch</span><select value={style} onChange={(event) => setStyle(event.target.value)}>{STYLES.map((item) => <option key={item}>{item}</option>)}</select></label>
-        <label className="field prompt-field"><span>Ý tưởng hoặc kịch bản có sẵn</span><textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} aria-invalid={prompt.trim().length > MAX_SCRIPT_CHARS} placeholder={"NAM (trầm): Xin chào.\nNỮ (vui): Chào anh.\n\nCó thể thêm mốc: [00:00 - 00:05] NAM: Lời thoại..."} /><small>{prompt.length}/{MAX_SCRIPT_CHARS.toLocaleString("vi-VN")} ký tự{prompt.trim().length > MAX_SCRIPT_CHARS ? " • Nội dung quá dài, hãy chia thành các phần; hệ thống chưa cắt bớt chữ." : " • Mỗi nhân vật nên bắt đầu một dòng bằng NAM: hoặc NỮ:. Bấm Dùng kịch bản đã nhập để tách trực tiếp, không cần ảnh/video hay OpenAI."}</small></label>
-        <div className="voice-grid"><label className="field voice male"><span><i /> Nhân vật nam</span><input placeholder="voice_id, ví dụ vi-adam" value={voiceIds.male} onChange={(event) => setVoiceIds((current) => ({ ...current, male: event.target.value }))} /></label><label className="field voice female"><span><i /> Nhân vật nữ</span><input placeholder="voice_id hoặc vc_..." value={voiceIds.female} onChange={(event) => setVoiceIds((current) => ({ ...current, female: event.target.value }))} /></label></div>
+        <label className="field prompt-field"><span>Ý tưởng hoặc kịch bản có sẵn</span><textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} aria-invalid={prompt.trim().length > MAX_SCRIPT_CHARS} placeholder={"A (trầm): Xin chào.\nB (vui): Chào bạn.\n\nCó thể thêm mốc: [00:00 - 00:05] Nhân vật A: Lời thoại..."} /><small>{prompt.length}/{MAX_SCRIPT_CHARS.toLocaleString("vi-VN")} ký tự{prompt.trim().length > MAX_SCRIPT_CHARS ? " • Nội dung quá dài, hãy chia thành các phần; hệ thống chưa cắt bớt chữ." : " • Bắt đầu mỗi lượt bằng A: hoặc B:. Vẫn nhận NAM:/NỮ: theo giới tính đã chọn; nếu hai nhân vật cùng giới tính, hãy dùng A:/B: để phân biệt."}</small></label>
+        <div className="voice-grid character-grid">{(["a", "b"] as const).map((role) => {
+          const available = voiceLibrary.filter((voice) => voice.gender === characters[role].gender);
+          const current = voiceLibrary.find((voice) => voice.id === voiceIds[role]);
+          return <section className={`character-card ${role}`} key={role} aria-label={CHARACTER_LABELS[role]}><h3>{CHARACTER_LABELS[role]}</h3>
+            <label className="field"><span>Giới tính {role.toUpperCase()}</span><select value={characters[role].gender} onChange={(event) => {
+              stopSpeech(); const gender = event.target.value as Gender;
+              setCharacters((value) => ({ ...value, [role]: { gender } }));
+              setVoiceIds((value) => ({ ...value, [role]: voiceLibrary.find((voice) => voice.gender === gender)?.id || "" }));
+            }}><option value="male">Nam</option><option value="female">Nữ</option></select></label>
+            <label className="field"><span>Giọng đọc {role.toUpperCase()}</span><select value={voiceIds[role]} onChange={(event) => { stopSpeech(); setVoiceIds((value) => ({ ...value, [role]: event.target.value })); }}>
+              <option value="">Chọn giọng {characters[role].gender === "male" ? "nam" : "nữ"}</option>
+              {voiceIds[role] && !available.some((voice) => voice.id === voiceIds[role]) && <option value={voiceIds[role]}>{current?.name || voiceIds[role]} (đã chọn trước)</option>}
+              {available.map((voice) => <option value={voice.id} key={voice.id}>{voice.name} · {voice.source === "clone" ? "Clone" : "Hệ thống"}</option>)}
+            </select></label><small className="voice-id">{voiceIds[role] || "Chưa chọn giọng"}</small>
+            {!available.length && <small>Chưa có giọng phù hợp. Chọn thêm tại mục Quản lý giọng.</small>}
+          </section>;
+        })}</div>
+        {libraryError && <p className="voice-note" role="alert">{libraryError}</p>}
         <p className="voice-note">Hai Voice ID SaydiVoice được giữ riêng. Nghe thử và tạo âm thanh dùng credits theo ký tự; các đoạn đã tạo trong tab này được dùng lại. AI chỉ xem khung hình mẫu, không nghe âm thanh.</p>
         <div className="action-row analysis-actions">
           <button type="button" className="button primary" disabled={busy} aria-describedby="analysis-help" onClick={() => void analyze()}><Icon name="spark" />{busy ? "Đang phân tích..." : prompt.trim() && (!file || aiFallbackReason) ? "Tách kịch bản đã nhập" : file ? "Phân tích bằng OpenAI" : "Chọn tệp để phân tích"}</button>
@@ -384,13 +410,13 @@ export default function Studio({ config: initialConfig }: { config: PublicRuntim
         <div className="lines">{scene.lines.map((line) => {
           const reader = readerForSpeaker(line.speaker, voiceMode);
           return <div className={`dialogue ${line.speaker}`} key={line.id}>
-            <button className="speaker-toggle" type="button" onClick={() => updateLine(scene.id, line.id, { speaker: line.speaker === "male" ? "female" : "male" })} aria-label="Đổi nhân vật"><i>{line.speaker === "male" ? "N" : "Nữ"}</i><span>{line.speaker === "male" ? "Nam" : "Nữ"}</span></button>
+            <button className="speaker-toggle" type="button" onClick={() => updateLine(scene.id, line.id, { speaker: line.speaker === "a" ? "b" : "a" })} aria-label={`Đổi ${CHARACTER_LABELS[line.speaker]}`}><i>{line.speaker.toUpperCase()}</i><span>{characters[line.speaker].gender === "male" ? "Nam" : "Nữ"}</span></button>
             <div className="dialogue-main">
               <textarea aria-label="Nội dung thoại" value={line.text} maxLength={800} placeholder="Nhập lời thoại..." onChange={(event) => updateLine(scene.id, line.id, { text: event.target.value })} />
               <div className="line-meta"><label>Cảm xúc <input value={line.emotion} onChange={(event) => updateLine(scene.id, line.id, { emotion: event.target.value })} /></label><label>Bắt đầu <input type="number" min="0" step="0.1" value={line.start} onChange={(event) => updateLine(scene.id, line.id, { start: Number(event.target.value) })} /></label><label>Kết thúc <input type="number" min="0.1" step="0.1" value={line.end} onChange={(event) => updateLine(scene.id, line.id, { end: Number(event.target.value) })} /></label></div>
             </div>
             <div className="line-tools">
-              <button type="button" className={speechStatus?.lineId === line.id ? `is-${speechStatus.phase}` : ""} disabled={speechStatus?.lineId !== line.id && (!config.saydiReady || !line.text.trim() || !voiceIds[reader].trim() || busy)} title={speechStatus?.lineId === line.id ? "Dừng giọng đọc" : "Nghe thử giọng đọc (SaydiVoice tính phí theo ký tự)"} aria-label={speechStatus?.lineId === line.id ? "Dừng giọng đọc" : `Nghe thử giọng ${reader === "male" ? "nam" : "nữ"}`} onClick={() => void previewSpeech(line)}><Icon name={speechStatus?.lineId === line.id ? "stop" : "play"} /></button>
+              <button type="button" className={speechStatus?.lineId === line.id ? `is-${speechStatus.phase}` : ""} disabled={speechStatus?.lineId !== line.id && (!config.saydiReady || !line.text.trim() || !voiceIds[reader].trim() || busy)} title={speechStatus?.lineId === line.id ? "Dừng giọng đọc" : "Nghe thử giọng đọc (SaydiVoice tính phí theo ký tự)"} aria-label={speechStatus?.lineId === line.id ? "Dừng giọng đọc" : `Nghe thử ${CHARACTER_LABELS[reader]}`} onClick={() => void previewSpeech(line)}><Icon name={speechStatus?.lineId === line.id ? "stop" : "play"} /></button>
               <button onClick={() => removeLine(scene.id, line.id)} aria-label="Xóa câu"><Icon name="trash" /></button>
             </div>
           </div>;
@@ -401,8 +427,8 @@ export default function Studio({ config: initialConfig }: { config: PublicRuntim
       <div className="panel-heading"><div><span className="section-number">04</span><h2>Tạo âm thanh</h2></div><small>MỘT FILE WAV</small></div>
       <div className="audio-body">
         <p id="audio-help">Tạo toàn bộ lời thoại bằng giọng đã chọn rồi ghép thành một file WAV để bạn tải về. Tối đa 30 phút mỗi file; hãy giữ trang mở trong lúc tạo.</p>
-        <label className="field"><span>Chế độ giọng đọc</span><select value={voiceMode} disabled={audioBusy} onChange={(event) => { stopSpeech(); setVoiceMode(event.target.value as VoiceMode); }}><option value="dual">Hai giọng nam và nữ</option><option value="male">Chỉ giọng nam</option><option value="female">Chỉ giọng nữ</option></select></label>
-        <p className="voice-note">{voiceMode === "dual" ? "Mỗi câu dùng Voice ID của nhân vật nam hoặc nữ trong hội thoại." : `Toàn bộ các câu sẽ dùng Voice ID giọng ${voiceMode === "male" ? "nam" : "nữ"}, bao gồm lời của cả hai nhân vật.`} Chế độ này áp dụng cả nghe thử từng câu. Hai Voice ID của bạn vẫn được giữ riêng.</p>
+        <label className="field"><span>Chế độ giọng đọc</span><select value={voiceMode} disabled={audioBusy} onChange={(event) => { stopSpeech(); setVoiceMode(event.target.value as VoiceMode); }}>{Object.entries(VOICE_MODE_LABELS).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+        <p className="voice-note">{voiceMode === "dual" ? "Mỗi câu dùng giọng của nhân vật A hoặc B đã chọn ở trên. Hai nhân vật có thể cùng giới tính, với hai giọng khác nhau." : `Toàn bộ các câu sẽ dùng giọng ${CHARACTER_LABELS[voiceMode]}, bao gồm lời của cả hai nhân vật.`} Chế độ này áp dụng cả nghe thử từng câu.</p>
         <label className="field"><span>Cách ghép âm thanh</span><select value={audioMode} disabled={audioBusy} onChange={(event) => setAudioMode(event.target.value as AudioJoinMode)}><option value="continuous">Nối liên tục các câu</option><option value="timeline">Theo mốc thời gian, giữ khoảng nghỉ</option></select></label>
         <p className="voice-note">{audioMode === "continuous" ? "Các câu phát theo thứ tự thời gian, cách nhau một khoảng nghỉ ngắn." : "Giữ mốc bắt đầu của từng câu. Nếu câu trước đọc dài hơn mốc dự kiến, câu sau sẽ lùi lại để phát đủ lời."}</p>
         <div className="action-row"><button type="button" className="button primary" disabled={busy || audioBusy} aria-describedby="audio-help" onClick={() => void generateAudio()}><Icon name="spark" />{audioBusy ? "Đang tạo âm thanh..." : audioExport ? "Tạo lại âm thanh toàn bộ" : "Tạo âm thanh toàn bộ"}</button>{audioBusy && <button type="button" className="button ghost danger" onClick={() => audioRequestRef.current?.abort()}><Icon name="stop" />Dừng tạo</button>}</div>

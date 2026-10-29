@@ -119,9 +119,44 @@ svg { width: 20px; height: 20px; }
 .analysis-actions { flex-wrap: wrap; }
 .setup-panel .analysis-actions > .button { flex: 1 1 220px; }
 .voice-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.topbar-actions { display: flex; align-items: center; gap: 18px; }
+.admin-link { color: var(--red); font-size: 12px; text-underline-offset: 4px; }
+.character-card { min-width: 0; margin-top: 18px; padding: 14px; border: 1px solid var(--line); border-top: 3px solid #415f72; background: rgba(255,255,255,.4); }
+.character-card.b { border-top-color: #9b4f65; }
+.character-card h3 { margin: 0; font-family: Georgia, serif; font-size: 18px; font-weight: 500; }
+.character-card .field { margin-top: 14px; }
+.character-card small { display: block; margin-top: 8px; font-size: 10px; color: var(--muted); line-height: 1.5; }
+.voice-id { display: block; overflow-wrap: anywhere; font-size: 10px; color: var(--muted); }
+.admin-intro { max-width: 760px; padding: 46px 0 24px; }
+.admin-intro h1 { font-family: Georgia, serif; font-weight: 400; font-size: clamp(32px,5vw,54px); margin: 0 0 16px; }
+.admin-intro p { line-height: 1.7; color: var(--muted); }
+.admin-login { max-width: 460px; padding: 24px; }
+.admin-login h2 { margin-top: 0; font-family: Georgia, serif; font-weight: 400; }
+.admin-login p { font-size: 13px; line-height: 1.6; }
+.admin-login .button { margin-top: 20px; width: 100%; }
+.admin-toolbar { display: flex; gap: 18px; flex-wrap: wrap; align-items: center; justify-content: space-between; }
+.admin-toolbar small { display: block; margin-top: 7px; font-size: 12px; color: var(--muted); }
+.admin-toolbar .action-row { margin-top: 0; flex-wrap: wrap; }
+.admin-filters { display: grid; grid-template-columns: 2fr 1fr; gap: 18px; margin-bottom: 24px; }
+.voice-catalogue { display: grid; grid-template-columns: repeat(auto-fill,minmax(260px,1fr)); gap: 16px; }
+.catalogue-card { padding: 20px; min-width: 0; }
+.catalogue-card.selected { border-color: var(--green); }
+.voice-select { display: flex; align-items: start; gap: 10px; font-size: 16px; line-height: 1.5; cursor: pointer; }
+.voice-select input { width: 20px; height: 20px; flex: 0 0 20px; accent-color: var(--green); }
+.catalogue-meta { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 8px; color: var(--muted); font-size: 10px; }
+.catalogue-card .button { margin-top: 14px; }
+.voice-preview { margin-bottom: 20px; display: flex; gap: 18px; align-items: center; flex-wrap: wrap; padding: 18px; }
+.voice-preview audio { max-width: 100%; }
+@media (max-width: 600px) {
+  .topbar-actions { gap: 8px; flex-direction: column; align-items: end; }
+  .topbar-actions .status-pill { padding: 4px 6px; font-size: 8px; }
+  .topbar-actions .admin-link { font-size: 11px; }
+  .character-grid, .admin-filters { grid-template-columns: 1fr; }
+  .admin-toolbar .button { flex: 1 1 180px; }
+}
 .field.voice > span { display: flex; align-items: center; gap: 7px; }
 .field.voice > span i { width: 8px; height: 8px; border-radius: 50%; background: #415f72; }
-.field.voice.female > span i { background: #9b4f65; }
+.field.voice.b > span i { background: #9b4f65; }
 .voice-note { margin-top: 13px; color: var(--muted); font-size: 11px; line-height: 1.55; }
 .action-row { display: flex; gap: 9px; margin-top: 18px; }
 .button { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 9px; padding: 0 17px; border: 1px solid transparent; color: inherit; background: none; text-decoration: none; font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; cursor: pointer; transition: .18s ease; }
@@ -161,11 +196,11 @@ svg { width: 20px; height: 20px; }
 .lines { min-width: 0; }
 .dialogue { display: grid; grid-template-columns: 74px 1fr 38px; min-height: 130px; border-bottom: 1px solid var(--line); }
 .dialogue:last-child { border-bottom: 0; }
-.dialogue.male { border-left: 3px solid #415f72; }
-.dialogue.female { border-left: 3px solid #9b4f65; }
+.dialogue.a { border-left: 3px solid #415f72; }
+.dialogue.b { border-left: 3px solid #9b4f65; }
 .speaker-toggle { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; padding: 8px; border: 0; border-right: 1px solid var(--line); background: transparent; cursor: pointer; }
 .speaker-toggle i { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; color: white; background: #415f72; font-style: normal; font-size: 10px; }
-.female .speaker-toggle i { background: #9b4f65; }
+.b .speaker-toggle i { background: #9b4f65; }
 .speaker-toggle span { font-size: 10px; font-weight: 800; text-transform: uppercase; }
 .dialogue-main { min-width: 0; padding: 13px 14px; }
 .dialogue textarea { width: 100%; min-height: 58px; resize: vertical; padding: 10px; border: 0; border-bottom: 1px solid var(--line); outline: 0; background: transparent; font-family: Georgia, serif; font-size: 16px; line-height: 1.45; }

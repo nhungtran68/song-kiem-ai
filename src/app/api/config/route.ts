@@ -7,8 +7,8 @@ export async function GET() {
     saydiSpeechSchemaReady: true,
     aiModel: process.env.OPENAI_MODEL || "gpt-5.4-mini",
     voiceIds: {
-      male: process.env.SAYDI_MALE_VOICE_ID || "",
-      female: process.env.SAYDI_FEMALE_VOICE_ID || "",
+      a: process.env.SAYDI_MALE_VOICE_ID || "",
+      b: process.env.SAYDI_FEMALE_VOICE_ID || "",
     },
   }, { headers: { "Cache-Control": "no-store" } });
 }

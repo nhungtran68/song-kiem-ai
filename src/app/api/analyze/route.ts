@@ -17,6 +17,7 @@ const requestSchema = z.object({
   title: z.string().trim().max(160),
   style: z.string().trim().min(1).max(80),
   prompt: z.string().trim().max(MAX_SCRIPT_CHARS),
+  characters: z.object({ a: z.object({ gender: z.enum(["male", "female"]) }), b: z.object({ gender: z.enum(["male", "female"]) }) }).default({ a: { gender: "male" }, b: { gender: "female" } }),
   mediaKind: z.enum(["image", "video"]),
   duration: z.number().min(0).max(7_200),
   frames: z.array(frameSchema).min(1).max(8),
@@ -52,7 +53,7 @@ const scriptSchema = {
               additionalProperties: false,
               required: ["speaker", "text", "emotion", "start", "end"],
               properties: {
-                speaker: { type: "string", enum: ["male", "female"] },
+                speaker: { type: "string", enum: ["a", "b"] },
                 text: { type: "string" },
                 emotion: { type: "string" },
                 start: { type: "number" },
@@ -84,14 +85,14 @@ export async function POST(request: Request) {
   const parsed = requestSchema.safeParse(json);
   if (!parsed.success) return NextResponse.json({ error: "Thông tin ảnh/video hoặc khung hình không hợp lệ." }, { status: 400 });
 
-  const { title, style, prompt, mediaKind, duration, frames } = parsed.data;
+  const { title, style, prompt, characters, mediaKind, duration, frames } = parsed.data;
   const model = process.env.OPENAI_MODEL || "gpt-5.4-mini";
   const timeline = frames.map((frame, index) => `Ảnh ${index + 1}: ${frame.time.toFixed(1)} giây`).join("; ");
   const instructions = [
-    "Bạn là biên kịch tiếng Việt cho hai nhân vật NAM và NỮ.",
+    `Bạn là biên kịch tiếng Việt cho hai nhân vật A và B. Nhân vật A là ${characters.a.gender === "male" ? "nam" : "nữ"}; nhân vật B là ${characters.b.gender === "male" ? "nam" : "nữ"}. Hai nhân vật có thể cùng giới tính.`,
     "Phân tích điều THỰC SỰ thấy trong các khung hình theo thứ tự thời gian. Không khẳng định nội dung giữa các khung hình, lời nói hay âm thanh vì bạn không được cung cấp âm thanh và video gốc.",
     "Viết tóm tắt hình ảnh và kịch bản đối thoại sáng tạo, tự nhiên, có cảm xúc. Phân biệt phần quan sát với phần hư cấu trong tóm tắt.",
-    "Chỉ dùng speaker male hoặc female. Tạo các cảnh và câu thoại có start/end tính bằng giây, start < end, không vượt quá thời lượng. Giới hạn 24 cảnh, mỗi cảnh tối đa 20 câu, mỗi câu tối đa 800 ký tự.",
+    "Chỉ dùng speaker a (nhân vật A) hoặc b (nhân vật B). Tạo các cảnh và câu thoại có start/end tính bằng giây, start < end, không vượt quá thời lượng. Giới hạn 24 cảnh, mỗi cảnh tối đa 20 câu, mỗi câu tối đa 800 ký tự.",
     mediaKind === "image" ? "Đây là ảnh tĩnh; tạo timeline ngắn khoảng 15 giây." : `Đây là video dài ${duration.toFixed(1)} giây. Chỉ có ${frames.length} khung hình mẫu.`,
     `Tên dự án: ${title || "Chưa đặt tên"}. Phong cách: ${style}.`,
     prompt ? `Ý tưởng của người dùng: ${prompt}` : "",

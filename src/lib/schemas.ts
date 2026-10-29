@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const speakerSchema = z.enum(["male", "female"]);
+export const speakerSchema = z.enum(["a", "b"]);
 
 export const dialogueLineSchema = z.object({
   speaker: speakerSchema,
