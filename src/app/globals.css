@@ -139,6 +139,8 @@ svg { width: 20px; height: 20px; }
 .admin-toolbar .action-row { margin-top: 0; flex-wrap: wrap; }
 .admin-filters { display: grid; grid-template-columns: 2fr 1fr; gap: 18px; margin-bottom: 24px; }
 .voice-catalogue { display: grid; grid-template-columns: repeat(auto-fill,minmax(260px,1fr)); gap: 16px; }
+.catalogue-pages { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; font-size: 12px; color: var(--muted); }
+.catalogue-pages .action-row { margin-top: 0; }
 .catalogue-card { padding: 20px; min-width: 0; }
 .catalogue-card.selected { border-color: var(--green); }
 .voice-select { display: flex; align-items: start; gap: 10px; font-size: 16px; line-height: 1.5; cursor: pointer; }

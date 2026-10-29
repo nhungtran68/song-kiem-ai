@@ -18,6 +18,7 @@ export default function VoiceAdmin() {
   const [genders, setGenders] = useState<Record<string, Gender | "unknown">>({});
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
+  const [page, setPage] = useState(0);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState<CatalogueVoice | null>(null);
@@ -26,7 +27,7 @@ export default function VoiceAdmin() {
     setBusy(true);
     try {
       const result: Library = await responseJson(await fetch("/api/admin/voices", { cache: "no-store" }));
-      setLibrary(result); setChoices(Object.fromEntries(result.voices.map((voice) => [voice.id, voice])));
+      setLibrary(result); setPage(0); setChoices(Object.fromEntries(result.voices.map((voice) => [voice.id, voice])));
       setGenders(Object.fromEntries(result.voices.map((voice) => [voice.id, voice.gender])));
       dirtyRef.current = false;
     } catch (error) { setMessage(error instanceof Error ? error.message : "Chưa tải được thư viện."); }
@@ -46,7 +47,8 @@ export default function VoiceAdmin() {
     const retained = (library?.voices || []).filter((voice) => !available.some((row) => row.id === voice.id)).map((voice) => ({ ...voice, ready: true, status: "saved" }));
     return [...available, ...retained].filter((voice) =>
       (filter === "all" || (filter === "selected" ? Boolean(choices[voice.id]) : voice.source === filter)) &&
-      `${voice.name} ${voice.id} ${voice.language}`.toLocaleLowerCase("vi").includes(query.toLocaleLowerCase("vi")));
+      `${voice.name} ${voice.id} ${voice.language}`.toLocaleLowerCase("vi").includes(query.toLocaleLowerCase("vi")))
+      .sort((a, b) => Number(b.source === "clone") - Number(a.source === "clone") || Number(b.language === "vi") - Number(a.language === "vi") || a.name.localeCompare(b.name, "vi"));
   }, [library, query, filter, choices]);
   const login = async (event: React.FormEvent) => {
     event.preventDefault(); setBusy(true); setMessage("");
@@ -82,10 +84,11 @@ export default function VoiceAdmin() {
         <button className="button ghost" disabled={busy} onClick={async () => { try { await responseJson(await fetch("/api/admin/session", { method: "DELETE" })); setSession({ ...session, authenticated: false }); setLibrary(null); setPreview(null); dirtyRef.current = false; } catch { setMessage("Chưa đăng xuất được. Hãy thử lại."); } }}>Đăng xuất</button>
       </div></div>
       {library?.warnings.map((warning) => <p className="notice error" role="alert" key={warning}>{warning}. Danh sách đã lưu được giữ nguyên.</p>)}
-      <div className="admin-filters"><label className="field"><span>Tìm tên hoặc mã giọng</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Tìm giọng Saydi..." /></label>
-        <label className="field"><span>Loại giọng</span><select value={filter} onChange={(event) => setFilter(event.target.value)}><option value="all">Tất cả giọng</option><option value="system">Giọng hệ thống</option><option value="clone">Giọng clone của tôi</option><option value="selected">Đã chọn sử dụng</option></select></label></div>
+      <div className="admin-filters"><label className="field"><span>Tìm tên hoặc mã giọng</span><input value={query} onChange={(event) => { setQuery(event.target.value); setPage(0); }} placeholder="Tìm giọng Saydi..." /></label>
+        <label className="field"><span>Loại giọng</span><select value={filter} onChange={(event) => { setFilter(event.target.value); setPage(0); }}><option value="all">Tất cả giọng</option><option value="system">Giọng hệ thống</option><option value="clone">Giọng clone của tôi</option><option value="selected">Đã chọn sử dụng</option></select></label></div>
       {preview && <div className="panel voice-preview"><strong>Nghe mẫu: {preview.name}</strong><audio key={preview.id} controls autoPlay src={`/api/voices/preview?id=${encodeURIComponent(preview.id)}`} onError={() => setMessage("Không tải được mẫu giọng này. Hãy thử lại.")} /><button className="button ghost compact" onClick={() => setPreview(null)}>Dừng nghe</button></div>}
-      <div className="voice-catalogue" aria-busy={busy}>{rows.map((voice) => {
+      <div className="catalogue-pages"><span>{rows.length} giọng phù hợp · Trang {Math.min(page, Math.max(0, Math.ceil(rows.length/30)-1)) + 1}/{Math.max(1, Math.ceil(rows.length/30))}</span><div className="action-row"><button className="button ghost compact" disabled={page === 0} onClick={() => setPage((current) => Math.max(0,current-1))}>Trang trước</button><button className="button ghost compact" disabled={(page+1)*30 >= rows.length} onClick={() => setPage((current) => current+1)}>Trang sau</button></div></div>
+      <div className="voice-catalogue" aria-busy={busy}>{rows.slice(Math.min(page, Math.max(0, Math.ceil(rows.length/30)-1))*30, (Math.min(page, Math.max(0, Math.ceil(rows.length/30)-1))+1)*30).map((voice) => {
         const selected = choices[voice.id]; const gender = genders[voice.id] || voice.gender;
         return <article className={`panel catalogue-card ${selected ? "selected" : ""}`} key={voice.id}>
           <label className="voice-select"><input type="checkbox" checked={Boolean(selected)} disabled={busy || !voice.ready} onChange={(event) => {
